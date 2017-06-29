@@ -92,27 +92,37 @@ check_geo <- function(x) {
   }
 }
 
-placeInGI = function(df,IDConnectorPath,landParcelsPath,landParcelsShpName="",landParcelsShpPath="",roadsPath="",roadsShpPath="",roadsShpName="") {
+placeInGI = function(df,IDConnectorPath,fuzzyMatching=T,projection = "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0",
+                     landParcelsPath,landParcelsShpName="",landParcelsShpPath="",
+                     roadsPath="",roadsShpPath="",roadsShpName="",
+                     blkShpPath="", blkShpName="",
+                     bgShpPath="", bgShpName="",
+                     ctShpPath="", ctShpName="") {
   geoVars = c("Land_Parcel_ID","X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD")
   for (var in geoVars) { df[,var] = NA}
   df$geoType = NA
   
   df = standardizeGeoNames(df)
+  df$uniqueGeocodeID = row.names(df)
   
   IDconnector = read.csv(IDConnectorPath,stringsAsFactors=F)
   landParcels = read.csv(landParcelsPath,stringsAsFactors=F)
   landParcels$TLID = landParcels$TLID_1
   IDconnector.geo = merge(IDconnector, landParcels,by="Land_Parcel_ID",all.x=T)
   
+  # Property_ID
+  ##############
   if ("Property_ID" %in% names(df)) {
     df = merge_and_move(df,
                         IDconnector.geo[!duplicated(IDconnector.geo$Property_ID),],
                         byx = "Property_ID",byy="Property_ID",allx=T,
                         varList=geoVars)
     df$geoType[is.na(df$geoType)&!is.na(df$Land_Parcel_ID)] = "Property_ID"
-  }
-  else {print("No Property_ID")}
+    print("Property_ID")
+  } else {print("No Property_ID")}
   
+  # Parcel_num
+  ##############  
   if ("parcel_num" %in% names(df)) {
     df = merge_and_move(df,
                         IDconnector.geo[!duplicated(IDconnector.geo$parcel_num),],
@@ -120,70 +130,152 @@ placeInGI = function(df,IDConnectorPath,landParcelsPath,landParcelsShpName="",la
                         varList=geoVars)  
     df$geoType[is.na(df$geoType)&!is.na(df$Land_Parcel_ID)] = "parcel_num"
     print(table(df$geoType))
+    print("parcel_num")
   } else {print("No parcel_num")}
   
+  # GIS_ID
+  ##############  
   if ("GIS_ID" %in% names(df)) {
     df = merge_and_move(df,
                         IDconnector.geo[!duplicated(IDconnector.geo$GIS_ID),],
                         byx = "GIS_ID",byy="GIS_ID",allx=T,
                         varList=geoVars)
     df$geoType[is.na(df$geoType)&!is.na(df$Land_Parcel_ID)] = "GIS_ID"
+    print("GIS_ID")
   }  else {print("No GIS_ID")}
   
-  if (sum(c("num1","num2","street_c","suffix_c","zip_c","city_c")%in%names(df))==6) {
-    df$uniqueGeocodeID = row.names(df)
-    df.geocode = df[ is.na(df$Land_Parcel_ID),]
+  # setting up shpfile
+  ##############  
+  
+  if (sum(c("lat","lng") %in% names(df))==2) {
+    df.shp = df[ !is.na(df$lat),]
+    coordinates(df.shp) = ~lng+lat 
+    proj4string(df.shp) = projection
+  }
+  
+  # Geocoding
+  ##############  
+  if (sum(c("num1","num2","street_c","suffix_c","zip_c","city_c") %in% names(df))==6) {
+    if (fuzzyMatching) {
+      df = fuzzymatchNames(df,refPath = landParcelsPath)
+    }
     
-    
-    # geocode against land parcels, without geographic data
-    geocoded = geocode(toGeocode = df.geocode,tgID = "uniqueGeocodeID",refName = "LandParcels",smallestGeo = "Land_Parcel_ID",
+    # LP NO GEO
+    ###########
+    geocoded.lp.ng = geocode(toGeocode = df[ is.na(df$Land_Parcel_ID),],tgID = "uniqueGeocodeID",refName = "LandParcels",smallestGeo = "Land_Parcel_ID",
                        geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"), refCSVPath = landParcelsPath)
     df = merge_and_move(df,
-                        geocoded,
+                        geocoded.lp.ng,
                         byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=F,
                         varList=geoVars)
     
+    print("Geocode - lp no geo")
+    
+    # LP WITH GEO
+    #############
     if (sum(c("lat","lng") %in% names(df))==2 & landParcelsShpPath!="" & landParcelsShpName!="") {
-      df.geocode.shp = df[ !is.na(df$lat) & is.na(df$Land_Parcel_ID),]
-      coordinates(df.geocode.shp) = ~lng+lat 
-      proj4string(df.geocode.shp) = "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
-      geocoded = geocode(toGeocode = df.geocode.shp,tgID = "uniqueGeocodeID",refName = "LandParcels",smallestGeo = "Land_Parcel_ID",
-              geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"),
+      
+      geocoded.lp.g = geocode(toGeocode = df.shp[ df.shp@data$uniqueGeocodeID %in% df$uniqueGeocodeID[ is.na(df$Land_Parcel_ID)],],tgID = "uniqueGeocodeID",refName = "LandParcels",smallestGeo = "Land_Parcel_ID",
+              geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"),maxGeoDistance=50,
               xy=T, refCSVPath = landParcelsPath,refShpPath = landParcelsShpPath,refShpName = landParcelsShpName)
       df = merge_and_move(df,
-                          geocoded,
-                          byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=F
+                          geocoded.lp.g,
+                          byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=T,
                           varList=geoVars)
+      print("Geocode - lp with geo")
+      
     } else { print("Lat/Lng vars or land parcels shapefile path not found")}
     
+    
+    # ROADS NO GEO
+    #############
     if (roadsPath!="") {
       
-      geocoded = geocode(toGeocode =df[ is.na(df$L)],tgID = "uniqueGeocodeID",refName = "Roads",smallestGeo = "TLID",
+      geocoded.r.ng = geocode(toGeocode =df[ is.na(df$Land_Parcel_ID),],tgID = "uniqueGeocodeID",refName = "Roads",smallestGeo = "TLID",
                          geographies = c("BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"), refCSVPath = roadsPath)
       df = merge_and_move(df,
-                          geocoded,
-                          byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=F
+                          geocoded.r.ng,
+                          byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=T,
                           varList=c("TLID","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"))
+      print("Geocode - roads no geo")
       
+      
+      # ROADS W GEO
+      #############
       if (sum(c("lat","lng") %in% names(df))==2 & roadsShpPath!="" & roadsShpName!="") {
-        df.geocode.shp = df[ !is.na(df$lat) & is.na(df$Land_Parcel_ID),]
-        coordinates(df.geocode.shp) = ~lng+lat 
-        proj4string(df.geocode.shp) = "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
-        geocoded = geocode(toGeocode = df.geocode.shp,tgID = "uniqueGeocodeID",refName = "Roads",smallestGeo = "TLID",
+        
+        geocoded.r.g = geocode(toGeocode =df.shp[ df.shp@data$uniqueGeocodeID %in% df$uniqueGeocodeID[ is.na(df$Land_Parcel_ID)],],
+                               tgID = "uniqueGeocodeID",refName = "Roads",smallestGeo = "TLID",maxGeoDistance=50,
                 geographies = c("BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"),
                 xy=T, refCSVPath = roadsPath,refShpPath = roadsShpPath,refShpName = roadsShpName)
         df = merge_and_move(df,
-                            geocoded,
-                            byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=F
+                            geocoded.r.g,
+                            byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=T,
                             varList=c("TLID","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"))
+        print("Geocode - roads with geo")
+        
       }  else { print("Lat/Lng vars or roads shapefile path not found")}
     } else { print("Roads path not found")}
   
+    # LPs less precise
+    #############
+    geocoded.lp.ng.2 = geocode(toGeocode = df[ is.na(df$Land_Parcel_ID),],tgID = "uniqueGeocodeID",maxNumDistance = 10, fullRange = T,oddsAndEvens = F,
+                                 refName = "LandParcels",smallestGeo = "Land_Parcel_ID",expand=T,
+                                 geographies = c("TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"),
+                                 refCSVPath = landParcels_path)
+    df = merge_and_move(df,
+                        geocoded.lp.ng.2,
+                       byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=T,
+                       varList=c("TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"))
+    print("Geocode - lp less precise no geo")
+    
+      
     df$geoType[is.na(df$geoType)&!is.na(df$Land_Parcel_ID)] = "Geocode"
-    df$uniqueGeocodeID = NULL
   } else { print("Street address vars not found")}
   
-  table(df$geoType)
+  if (sum(c("lat","lng") %in% names(df))==2 ) {
+    if (blkShpPath!="" & blkShpName!="") {
+      blkShp = readOGR(blkShpPath, blkShpName,stringsAsFactors=F)
+      df.shp.blk <- spTransform(df.shp[ df.shp$uniqueGeocodeID %in% df$uniqueGeocodeID[ is.na(df$Blk_ID_10)],], proj4string(blkShp)) 
+    
+      df.shp.overBlk = over(df.shp.blk,blkShp)
+      df.shp.overBlk$uniqueGeocodeID = df.shp.blk$uniqueGeocodeID
+      df = merge_and_move(df,
+                          df.shp.overBlk,
+                          byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=T,
+                          varList=c("Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD")) 
+      print("Block overlay")
+      
+    } else { print("Blocks not found")}
+    if (bgShpPath!="" & bgShpName!="") {
+      bgShp = readOGR(bgShpPath, bgShpName,stringsAsFactors=F)
+      df.shp.bg <- spTransform(df.shp[ df.shp$uniqueGeocodeID %in% df$uniqueGeocodeID[ is.na(df$BG_ID_10)],], proj4string(bgShp)) 
+      
+      df.shp.overBG = over(df.shp.bg,bgShp)
+      df.shp.overBG$uniqueGeocodeID = df.shp.bg$uniqueGeocodeID
+      df = merge_and_move(df,
+                          df.shp.overBG,
+                          byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=T,
+                          varList=c("BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD")) 
+      print("BG overlay")
+      
+    } else { print("BG not found")}
+    if (ctShpPath!="" & ctShpName!="") {
+      ctShp = readOGR(ctShpPath, ctShpName,stringsAsFactors=F)
+      df.shp.ct <- spTransform(df.shp[ df.shp$uniqueGeocodeID %in% df$uniqueGeocodeID[ is.na(df$CT_ID_10)],], proj4string(ctShp)) 
+      
+      df.shp.overCT = over(df.shp.ct,ctShp)
+      df.shp.overCT$uniqueGeocodeID = df.shp.ct$uniqueGeocodeID
+      df = merge_and_move(df,
+                          df.shp.overCT,
+                          byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=T,
+                          varList=c("CT_ID_10","NSA_NAME","BRA_PD")) 
+      print("CT overlay")   
+    } else { print("CTs not found")}
+  }
+ 
+  
+  df$uniqueGeocodeID = NULL
   return(df)
   
 }
