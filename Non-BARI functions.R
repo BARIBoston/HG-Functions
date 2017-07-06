@@ -227,11 +227,11 @@ convertTractData = function(oldData,tractID,scalingMin = .3, city = "Boston",
   # but i don't think there's any reason that it would be useful to have those rows anyway
   if (city =="Boston") {
     bostonTracts2000 = read.csv(bostonTracts2000Path,stringsAsFactors=F)
-    crosswalk_lim = crosswalk0010[ crosswalk0010$trtid00 %in% c(bostonTracts$CT_ID,25025010102),]
+    crosswalk_lim = crosswalk0010[ crosswalk0010$trtid00 %in% c(bostonTracts2000$CT_ID,25025010102),]
   }
   else if (city == "Chicago") {
     chicagoTracts2000 = read.csv(chicagoTracts2000Path,stringsAsFactors=F)$x
-    crosswalk_lim = crosswalk0010[ crosswalk0010$trtid00 %in% chicagoTracts,]
+    crosswalk_lim = crosswalk0010[ crosswalk0010$trtid00 %in% chicagoTracts2000,]
   } else {
     return("NO CITY")
   }

@@ -118,7 +118,7 @@ geocode <- function(toGeocode,tgID,refName,smallestGeo,geographies=c(),refCSVPat
   print("Loaded reference file")
 
   if (fuzzyMatching) {
-    toGeocode = fuzzymatchNames(toGeocode,refPath = refCSVPath)
+    toGeocode = fuzzymatchNames(toGeocode,reference = reference,referenceType="df")
   }
   #--------------------------------#  
   #      GEOCODING                 #
@@ -322,8 +322,10 @@ findClosestNum = function(df,smallestGeo,tgID) {
   return(list(df[which.min(temp),smallestGeo],min(temp),length(unique(df[,smallestGeo]))))
 }
           
-fuzzymatchNames = function(df, refPath,fuzzyMatch=Inf) {
-  reference = read.csv(refPath,stringsAsFactors=F)
+fuzzymatchNames = function(df, reference,referenceType,fuzzyMatch=Inf) {
+  if (referenceType == "path") {
+    reference = read.csv(reference,stringsAsFactors=F)    
+  } 
   if ("street_1" %in% names(reference)) {
     reference$street_c = reference$street_1
   }
