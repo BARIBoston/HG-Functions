@@ -52,7 +52,7 @@ library(stringdist)
 
 geocode <- function(toGeocode,tgID,refName,smallestGeo,geographies=c(),refCSVPath,
                     weirdRange=F,fullRange=F,oddsAndEvens=T,buffer=0,maxGeoDistance = Inf,maxNumDistance =0, expand = T,
-                    xy = F,refShpPath = "", refShpName = "", fuzzyMatching = F, batchSize = 3000,
+                    xy = F,refShpPath = "", refShpName = "", fuzzyMatching = F,fuzzyMatchDBPath ="", batchSize = 3000,
                     matches = list(
                       c("street_c","num1","suffix_c","zip_c"),
                       c("street_c","num1","suffix_c","city_c"),
@@ -118,7 +118,7 @@ geocode <- function(toGeocode,tgID,refName,smallestGeo,geographies=c(),refCSVPat
   print("Loaded reference file")
 
   if (fuzzyMatching) {
-    toGeocode = fuzzymatchNames(toGeocode,reference = reference,referenceType="df")
+    toGeocode = fuzzymatchNames(toGeocode,reference = reference,referenceType="df",fuzzyMatchDBPath=fuzzyMatchDBPath)
   }
   #--------------------------------#  
   #      GEOCODING                 #
@@ -322,26 +322,48 @@ findClosestNum = function(df,smallestGeo,tgID) {
   return(list(df[which.min(temp),smallestGeo],min(temp),length(unique(df[,smallestGeo]))))
 }
           
-fuzzymatchNames = function(df, reference,referenceType,fuzzyMatch=Inf) {
+fuzzymatchNames = function(df, reference,referenceType,fuzzyMatch=Inf,fuzzyMatchDBPath="") {
+  # get reference df
   if (referenceType == "path") {
     reference = read.csv(reference,stringsAsFactors=F)    
   } 
   if ("street_1" %in% names(reference)) {
     reference$street_c = reference$street_1
   }
+  # get fuzzy match DB
+  if (fuzzyMatchDBPath !="") {
+    fmdb= read.csv(fuzzyMatchDBPath,stringsAsFactors=F)
+    print("Fuzzy matches being recorded")
+  } else {
+    print("Fuzzy matches not being recorded")
+    fmdb = data.frame(street1=NA,street2=NA,decision=NA)
+  }
+
   uniqueStreet = unique(df$street_c)
-    for (i in c(1:length(uniqueStreet))) {
-      if (!uniqueStreet[i] %in% reference$street_c) {
-        temp = stringdist(uniqueStreet[i],reference$street_c)/nchar(uniqueStreet[i])
-        if (min(temp,na.rm = T) < fuzzyMatch) {
-          if (menu(c("Accept", "Reject"), title=paste(c(uniqueStreet[i],"--->",reference$street_c[which.min(temp)]),collapse=""))==1) {
-            df[!is.na(df$street_c) & df$street_c == uniqueStreet[i],"street_c"] = reference$street_c[which.min(temp)]
-            print("Accept")
-          } else {
-            print("Reject")
-          }
+  for (i in c(1:length(uniqueStreet))) {
+    if (!uniqueStreet[i] %in% reference$street_c) {
+      temp = stringdist(uniqueStreet[i],reference$street_c)/nchar(uniqueStreet[i])
+      if (min(temp,na.rm = T) < fuzzyMatch) {
+        # check if comparison already exists
+        dbCheck = grepl(uniqueStreet[i],fmdb$street1)*grepl(reference$street_c[which.min(temp)],fmdb$street2)
+        if (sum(dbCheck)>0) {
+          # there should only be one, but just in case I add the [1]
+          decision = fmdb$decision[dbCheck==1][1]
+        } else {
+          decision = 2-menu(c("Accept", "Reject"), title=paste(c(uniqueStreet[i],"--->",reference$street_c[which.min(temp)]),collapse=""))
+          fmdb[nrow(fmdb)+1,]=c(uniqueStreet[i],reference$street_c[which.min(temp)],decision)
+        }
+        if (decision) {
+          df[!is.na(df$street_c) & df$street_c == uniqueStreet[i],"street_c"] = reference$street_c[which.min(temp)]
+          print(paste(c(uniqueStreet[i],"-----YES---->",reference$street_c[which.min(temp)]),collapse=""))
+        } else {
+          print(paste(c(uniqueStreet[i],"-----NO------",reference$street_c[which.min(temp)]),collapse=""))
         }
       }
+    }
+  }
+  if (fuzzyMatchDBPath !="") {
+    write.csv(fmdb,fuzzyMatchDBPath,row.names=F)
   }
   return(df)
 }

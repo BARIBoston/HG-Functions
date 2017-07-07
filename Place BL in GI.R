@@ -21,7 +21,7 @@ bl$uniqueGeocodeID = c(1:nrow(bl))
 
 # take a sample, so we don't have to geocode all of them, while in this testing phase
 bl_sample = bl[sample(row.names(bl),1000),]
-
+bl_sample = bl
 # make subsamples of the data
 # citywide licenses, these we won't be able to place
 bl_sample_cw = bl_sample[ bl_sample$street_c == "CITYWIDE",]
@@ -60,6 +60,14 @@ sum(!is.na(bl_sample_geo$Land_Parcel_ID))/nrow(bl_sample_geo)
 sum(!is.na(bl_sample_geo$TLID))/nrow(bl_sample_geo)
 
 
+# adds on the others and writes
+bl_sample_cw[,c( "Land_Parcel_ID","X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD")] = NA
+bl_sample_e[,c( "Land_Parcel_ID","X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD")] = NA
+bl_sample_geo_whole = rbind(bl_sample_geo, bl_sample_cw,bl_sample_e)
 
+for (var in c( "street_c","num1","num2","suffix_c", "zip_c","city_c","uniqueGeocodeID") ) {
+  bl_sample_geo_whole[,var] = NULL
+}
 
+write.csv(bl_sample_geo_whole,"Documents/Research/BARI/Git/New-BARI/Other/BL_geo.csv",row.names=F)
 

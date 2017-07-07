@@ -74,7 +74,7 @@ table(geocoded.lp.nogeo$matchType)
 toGeocode = merge(toGeocode,geocoded.lp.nogeo[,c("PermitNumber","Land_Parcel_ID","CT_ID_10")],by="PermitNumber",all.x=T)
 
 # add fuzzy match to toGeocode
-toGeocode = fuzzymatchNames(toGeocode,refPath = landParcels_path,fuzzyMatch = Inf)
+toGeocode = fuzzymatchNames(toGeocode,reference = landParcels_path,referenceType = "path",fuzzyMatch = Inf)
 
 geocoded.lp.nogeo2 = geocode(toGeocode = toGeocode[ is.na(toGeocode$Land_Parcel_ID),],tgID = "PermitNumber",
                             refName = "LandParcels",smallestGeo = "Land_Parcel_ID",expand=T,
