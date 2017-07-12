@@ -338,32 +338,39 @@ fuzzymatchNames = function(df, reference,referenceType,fuzzyMatch=Inf,fuzzyMatch
     print("Fuzzy matches not being recorded")
     fmdb = data.frame(street1=NA,street2=NA,decision=NA)
   }
-
-  uniqueStreet = unique(df$street_c)
+  uniqueStreet = unique(df$street_c[! df$street_c %in% reference$street_c])
   for (i in c(1:length(uniqueStreet))) {
-    if (!uniqueStreet[i] %in% reference$street_c) {
-      temp = stringdist(uniqueStreet[i],reference$street_c)/nchar(uniqueStreet[i])
-      if (min(temp,na.rm = T) < fuzzyMatch) {
-        # check if comparison already exists
-        dbCheck = grepl(uniqueStreet[i],fmdb$street1)*grepl(reference$street_c[which.min(temp)],fmdb$street2)
-        if (sum(dbCheck)>0) {
-          # there should only be one, but just in case I add the [1]
-          decision = fmdb$decision[dbCheck==1][1]
-        } else {
-          decision = 2-menu(c("Accept", "Reject"), title=paste(c(uniqueStreet[i],"--->",reference$street_c[which.min(temp)]),collapse=""))
-          fmdb[nrow(fmdb)+1,]=c(uniqueStreet[i],reference$street_c[which.min(temp)],decision)
+    temp = stringdist(uniqueStreet[i],reference$street_c)/nchar(uniqueStreet[i])
+    if (min(temp,na.rm = T) < fuzzyMatch) {
+      # check if comparison already exists
+      dbCheck = tryCatch({
+        grepl(uniqueStreet[i],fmdb$street1)*grepl(reference$street_c[which.min(temp)],fmdb$street2)
+      },error = function(e){
+        rep(0,length(fmdb$street1))
+      })  
+      if (sum(dbCheck)>0) {
+        # there should only be one, but just in case I add the [1]
+        decision = fmdb$decision[dbCheck==1][1]
+      } else {
+        decision = 2-menu(c("Accept", "Reject","End fuzzy matching"), title=paste(c(i,"/",length(uniqueStreet),": ",uniqueStreet[i],"--->",reference$street_c[which.min(temp)]),collapse=""))
+        if (decision == -1) {
+          print("Ending fuzzy matching")
+          break
         }
-        if (decision) {
-          df[!is.na(df$street_c) & df$street_c == uniqueStreet[i],"street_c"] = reference$street_c[which.min(temp)]
-          print(paste(c(uniqueStreet[i],"-----YES---->",reference$street_c[which.min(temp)]),collapse=""))
-        } else {
-          print(paste(c(uniqueStreet[i],"-----NO------",reference$street_c[which.min(temp)]),collapse=""))
-        }
+        fmdb[nrow(fmdb)+1,]=c(uniqueStreet[i],reference$street_c[which.min(temp)],decision)
       }
+      if (as.numeric(decision)==1) {
+        df[!is.na(df$street_c) & df$street_c == uniqueStreet[i],"street_c"] = reference$street_c[which.min(temp)]
+        if (sum(dbCheck)>0){print(paste(c(uniqueStreet[i],"-----YES---->",reference$street_c[which.min(temp)]),collapse=""))}
+      } else {
+        if (sum(dbCheck)>0){print(paste(c(uniqueStreet[i],"-----NO------",reference$street_c[which.min(temp)]),collapse=""))}
+      }
+    }
+    if (i%%50) {
+      write.csv(fmdb,fuzzyMatchDBPath,row.names=F)      
     }
   }
   if (fuzzyMatchDBPath !="") {
-    write.csv(fmdb,fuzzyMatchDBPath,row.names=F)
   }
   return(df)
 }
@@ -382,8 +389,6 @@ returnFullReference = function(refName,weirdRange=F,buffer=0,fullRange=F,oddsAnd
     for (num in c(1:2)) {
       parcels_sub = referenceOriginal[,c("Land_Parcel_ID",paste(c("minNum_","maxNum_","street_","suffix_","TLID_"),num,sep="" ),"zip","X","Y","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD")]
       names(parcels_sub)[2:7]<-c("num1","num2","street_c","suffix_c","TLID","zip_c")
-      parcels_sub$zip_c = clean_zip(parcels_sub$zip_c)
-      parcels_sub$city_c=NA
       if (!is.data.frame(reference_raw)) {
         reference_raw =  parcels_sub
       } else {
@@ -391,6 +396,11 @@ returnFullReference = function(refName,weirdRange=F,buffer=0,fullRange=F,oddsAnd
       }
       reference_raw = reference_raw[!is.na(reference_raw$num1),]
     }
+    # cleans here, in case any changes to the cleaning has been made since constructing the land parcels file, for example i just added something to take out apostrophes in street names
+    reference_raw$zip_c = clean_zip(reference_raw$zip_c)
+    reference_raw$street_c = clean_streetName(reference_raw$street_c)
+    reference_raw$suffix_c = clean_suffix(reference_raw$suffix_c)
+    reference_raw$city_c=NA
     
     #gives a generic name to the ID
     reference_raw$ReferenceID = reference_raw$Land_Parcel_ID

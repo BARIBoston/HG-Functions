@@ -109,6 +109,8 @@ clean_num <- function(number) {
 # again, a lot of the regexes could be rewritten and combined to be much more efficient
 clean_streetName <- function(streetName) {
   streetName <- trim(toupper(streetName))
+  streetName <- gsub("&#039","",streetName)
+  streetName <- gsub("'","",streetName)
   
   streetName=gsub("^E ","EAST ",streetName)
   streetName=gsub(" E "," EAST ",streetName)
@@ -243,7 +245,7 @@ clean_suffix <- function(suffix) {
   suffix[suffix=="ROWE"|suffix=="RO"] <- "ROW"
   suffix[suffix=="ROAD"] <- "RD"
   suffix[suffix=="AV"|suffix=="AVE."] <- "AVE"
-  suffix[suffix=="TER"|suffix=="TE"] <- "TERR"
+  suffix[suffix=="TER"|suffix=="TE"|suffix=="TERRACE"] <- "TERR"
   suffix[suffix=="COURT"] <- "CT"
   suffix[suffix=="PARKWAY"] <- "PKWY"
   suffix[suffix=="PLACE"] <- "PL"
@@ -256,7 +258,7 @@ clean_suffix <- function(suffix) {
   suffix[suffix=="PARK"] <- "PK" 
   suffix[suffix=="CIRCUIT"] <- "CIRT"
   suffix[suffix=="CC"] <- "CIRT"
-  suffix[suffix=="BL"] <- "BLVD"
+  suffix[suffix=="BL"|suffix=="BOULEVARD"] <- "BLVD"
   suffix[suffix=="PKWY"] <- "PW"
   suffix[suffix==""] <- NA
   return(suffix)
@@ -302,7 +304,7 @@ clean_city <- function(city) {
 
 # cleans and returns a vector of zips, again, crappy regex!
 clean_zip <- function(zip) {
-  zip = gsub(",","",as.character(trim(zip)))
+  zip = gsub(",","",gsub(",","",as.character(trim(zip))))
   zip[zip=="NULL"|zip=="NA"|zip=="0"]<-NA
   pattern1 = "^([0-9]{4})$"
   match1 = str_match(zip,pattern1)[,2]
@@ -310,10 +312,10 @@ clean_zip <- function(zip) {
   pattern2 = "^([0-9]{5})$"
   match2 = str_match(zip,pattern2)[,2]
   
-  pattern3 = "^([0-9]{4})-([0-9]{4})$"
+  pattern3 = "^([0-9]{4})-([0-9]{0,4})$"
   match3 = str_match(zip,pattern3)[,2]
   
-  pattern4 = "^([0-9]{5})-([0-9]{4})$"
+  pattern4 = "^([0-9]{5})-([0-9]{0,4})$"
   match4 = str_match(zip,pattern4)[,2]
   
   cleaned_zip = zip
