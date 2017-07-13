@@ -426,6 +426,14 @@ returnFullReference = function(refName,weirdRange=F,buffer=0,fullRange=F,oddsAnd
     reference_raw$ReferenceID = paste(reference_raw$TLID,reference_raw$side,sep="")
     reference_raw = reference_raw[ ,c("ReferenceID", "num1","num2","street_c","suffix_c","zip_c","city_c","TLID","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD")]
     reference_raw = reference_raw[!is.na(reference_raw$num1),]
+  } else if (refName == "Sam") {
+    # reup the cleaning
+    reference_raw = referenceOriginal
+    reference_raw$street_c = clean_streetName(reference_raw$street_c)
+    reference_raw$suffix_c = clean_suffix(reference_raw$suffix_c)
+    reference_raw$zip_c = clean_zip(reference_raw$zip_c)
+    reference_raw$city_c = clean_city(reference_raw$city_c)
+    reference_raw$ReferenceID = reference_raw$SAM_ADDRESS_ID
   } else {
     print("REFERENCE NAME NOT FOUND")
   }

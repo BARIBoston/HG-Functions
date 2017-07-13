@@ -7,6 +7,8 @@ landParcels_path = "/Users/henrygomory/Documents/Research/BARI/Git/New-BARI/Geog
 landParcelsShpPath = "/Users/henrygomory/Documents/Research/BARI/Git/New-BARI/Geographical Infrastructure 2017/LandParcels.2017.shp/"
 landParcelsShpName = "LandParcels.2017"
 
+samPath = "Documents/Research/BARI/Git/New-BARI/Geographical Infrastructure 2017/sam_wGeos.csv"
+
 roadsCSVPath  = "Documents/Research/BARI/Geographic Infrastructure/Geographical Infrastructure 2015/Roads 2015/roads_updated.csv"
 roadsShpPath = "Documents/Research/BARI/Geographic Infrastructure/Geographical Infrastructure 2015/Roads 2015/"
 roadsShpName = "roads_updated"
@@ -43,6 +45,8 @@ geocoded.lp.nogeo =  geocode(toGeocode = toGeocode,tgID = "PermitNumber",
           geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"),
           refCSVPath = landParcels_path)
 table(geocoded.lp.nogeo$matchType)
+
+
 
 # the geocode prints the number of "full geocodes" - meaning it found a "smallestGeo" - from each type of match
 # the functions returns a dataset with a row for every row in the geocoded dataset, whether or not matches were found, and the following fields:
@@ -138,7 +142,13 @@ geocoded.roads.geo = geocode(toGeocode = toGeocode.shp,tgID = "PermitNumber",ref
           refCSVPath = roadsCSVPath)
 
 
+# geocode against sam
+geocoded.s.nogeo =  geocode(toGeocode = toGeocode,tgID = "PermitNumber",fuzzyMatching = Inf, fuzzyMatchDBPath = "Documents/Research/BARI/Git/New-BARI/Functions/fuzzyMatchDB.csv",
+                             refName = "Sam",smallestGeo = "Land_Parcel_ID",expand=T,
+                             geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"),
+                             refCSVPath = samPath)
 
+table(geocoded.s.nogeo$matchType)
 
 
 

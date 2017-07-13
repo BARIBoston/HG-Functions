@@ -109,8 +109,9 @@ clean_num <- function(number) {
 # again, a lot of the regexes could be rewritten and combined to be much more efficient
 clean_streetName <- function(streetName) {
   streetName <- trim(toupper(streetName))
-  streetName <- gsub("&#039","",streetName)
+  streetName <- gsub("&#039;","",streetName)
   streetName <- gsub("'","",streetName)
+  streetName <- gsub("-","",streetName)
   
   streetName=gsub("^E ","EAST ",streetName)
   streetName=gsub(" E "," EAST ",streetName)
@@ -240,26 +241,36 @@ clean_suffix <- function(suffix) {
   suffix[suffix=="ST E"] <-"ST EAST"
   suffix[suffix=="ST N"] <-"ST NORTH"
   
-  suffix[suffix=="PLAZA"]<- "PLZ"
-  suffix[suffix=="PZ"]<- "PLZ"
+  suffix[suffix=="PLAZA"|suffix=="PZ"]<- "PLZ"
   suffix[suffix=="ROWE"|suffix=="RO"] <- "ROW"
+  suffix[suffix=="DRIVE"] <- "DR"
   suffix[suffix=="ROAD"] <- "RD"
-  suffix[suffix=="AV"|suffix=="AVE."] <- "AVE"
+  suffix[suffix=="AV"|suffix=="AVE."|suffix=="AVENUE"] <- "AVE"
   suffix[suffix=="TER"|suffix=="TE"|suffix=="TERRACE"] <- "TERR"
   suffix[suffix=="COURT"] <- "CT"
   suffix[suffix=="PARKWAY"] <- "PKWY"
   suffix[suffix=="PLACE"] <- "PL"
-  suffix[suffix=="AVENUE"] <- "AVE"
   suffix[suffix=="STREET"|suffix=="STRET"] <- "ST"
   suffix[suffix=="WY"] <- "WAY"
-  suffix[suffix=="LA"] <- "LN"
-  suffix[suffix=="CI"] <- "CIR"
-  suffix[suffix=="HW"|suffix=="HW."] <- "HWY" 
+  suffix[suffix=="LA"| suffix=="LANE"] <- "LN"
+  suffix[suffix=="CI"|suffix=="CIRCLE"] <- "CIR"
+  suffix[suffix=="HW"|suffix=="HW."|suffix=="HIGHWAY"] <- "HWY" 
   suffix[suffix=="PARK"] <- "PK" 
-  suffix[suffix=="CIRCUIT"] <- "CIRT"
-  suffix[suffix=="CC"] <- "CIRT"
+  suffix[suffix=="CRESCENT"] <- "CRES" 
+  suffix[suffix=="CIRCUIT"| suffix=="CC"] <- "CIRT"
   suffix[suffix=="BL"|suffix=="BOULEVARD"] <- "BLVD"
   suffix[suffix=="PKWY"] <- "PW"
+  suffix[suffix=="WHARF"] <- "WHF"
+  suffix[suffix=="ALLEY"] <- "ALY"
+  suffix[suffix=="CROSSWAY"] <- "CWY"
+  suffix[suffix=="DAM"] <- "DM"
+  suffix[suffix=="DRIVEWAY"] <- "DRWY"
+  suffix[suffix=="SQUARE"] <- "SQ"
+  suffix[suffix=="VIEW"] <- "VW"
+  suffix[suffix=="EXTENSION"] <- "EXT"
+  suffix[suffix=="GARDEN"|suffix=="GARDENS"|suffix=="GDNS"] <- "GDN"
+  suffix[suffix=="GREEN"] <- "GRN"
+  
   suffix[suffix==""] <- NA
   return(suffix)
 }
@@ -288,14 +299,19 @@ clean_city <- function(city) {
                            "HYPE PARK","HP")))] <- "HYDE PARK"
   city[!is.na(match(city,c("J P","J.P","JAMCIA PLAIN","JAMAIC PLAIN","JAMAICA","JAMAICA BLAIN","JAMAICA PLAINI","JAMAICA PLAN",
                            "JAMAICAPLAIN","JAMAICIA PLAIN","JAMIACA PLAIN","JAMICA PLAIN","JP","JAMACIA PLAIN")))] <- "JAMAICA PLAIN"
+  
   city[!is.na(match(city,c("MATAPABN","MATAPAN","MATTAAPAN","MATTAPN","MATTTAPAN","MT")))] <- "MATTAPAN"
+  
   city[!is.na(match(city,c("N END","NO. END","NORTHEND")))] <- "NORTH END"
   city[!is.na(match(city,c("ROLINDALE","ROSINDALE","ROSLINDANLE","ROSLINADLE","ROSLINDAEL","ROSLINDALE ST","ROSLNDALE",
                            "ROSLIDANLE","RS")))] <- "ROSLINDALE"
   city[!is.na(match(city,c("ROXBURY CROSSING","ROX","ROXBURY02119","ROXBURY02120","TOXBURY")))] <- "ROXBURY"
+  
   city[!is.na(match(city,c("S  BOSTON","S BOSTON","S. BOSTON","SO. BOSTON","SO.BOSTON","SOTH BOSTON","SOUHT BOSTON","SOUTH BOSOTN",
                            "SOUTH BOSTN","SOUTH BOSTOM","SOUTH BPSTOM","SOUTHBOSTON","BOUTH BOSTON","SB")))] <- "SOUTH BOSTON"
+  
   city[!is.na(match(city,c("S END","SE","SO. END","SOUTHEND")))] <- "SOUTH END"
+  
   city[!is.na(match(city,c("W ROXBURY","W  ROXBURY","W. ROX","W. ROXBURY","W.ROXBURY","WEST  ROXBURY","WEST ROXB URY",
                            "WEST ROXBRUY","WEST ROXBRY","WEST RXOBURY","WESTROXBURY","WR")))] <- "WEST ROXBURY"
   city[city == "" | city == "NA" | city == "N/A"] <- NA
