@@ -13,7 +13,8 @@ library(stringdist)
 #   any of them can be NA (for example city_c is almost always entirely NA, and num2 is almost entirely NA)
 #   those columns can be created using the cleaning functions 
 # tgID: unique ID for the data frame, must be unique!
-# refName: the database to match to, can either be "Roads" or "LandParcels"
+# refName: the database to match to, can either be "Roads","Sam", or "LandParcels"
+#   The reference file pointed to must have all of the geographies in the geographies argument
 # smallestGeo: the smallest geography after which you deem an object geocoded
 #   99% of the time this should be TLID for roads and Land_Parcel_ID for LandParcels
 #   I actually can't really think of a time when you would want something different, so maybe it should just be coded in that way
@@ -185,9 +186,6 @@ geocode <- function(toGeocode,tgID,refName,smallestGeo,geographies=c(),refCSVPat
           #if there is no xy data, for each geography check if all matches are in agreement 
           geocode_raw$tgID_ = geocode_raw[,tgID]
           
-          
-          
-          
           # vvvv This has to be the least efficient way in the world to do this , but it's only 3 lines
           geocode_f = data.frame(ph=NA)
           geocode_f[,tgID]= NA
@@ -207,10 +205,26 @@ geocode <- function(toGeocode,tgID,refName,smallestGeo,geographies=c(),refCSVPat
             }
           }
           geocode_f = geocode_f[!is.na(geocode_f[,tgID]),]
-          geocode_f$matchType = ifelse(!is.na(geocode_f[,smallestGeo]), "Unique",NA)
-          geocode_f$matchNumDist = NA
-          aggregate_geo = aggregate(smallestGeo~tgID_,geocode_raw,FUN=function(x){length(unique(x))})
-          geocode_f$numMatches = aggregate_geo$smallestGeo
+          
+          # there's a better way to do this, generally I need to make more formal what geocode_f, geocode_raw are about
+          # and then modularize them, with functions like, get geocode_f, but for now this was throwing an error if there was nothing in geocode_f
+          # so this is a spot fix
+          if (nrow(geocode_f)>0) {
+            geocode_f$matchNumDist = NA
+            geocode_f$matchType = ifelse(!is.na(geocode_f[,smallestGeo]), "Unique",NA)
+            geocode_f$matchGeoDist = NA 
+            if (sum(!is.na(geocode_raw$smallestGeo))>0) {
+              aggregate_geo = aggregate(smallestGeo~tgID_,geocode_raw,FUN=function(x){length(unique(x))})
+              geocode_f$numMatches = aggregate_geo$smallestGeo
+            }
+          }  else {
+            geocode_f$matchNumDist= logical(0)
+            geocode_f$matchType= logical(0)
+            geocode_f$numMatches = logical(0)
+            geocode_f$matchGeoDist = logical(0)
+          }
+          
+          
           # matchGeoDist is NA, because it was not a geographic match
           if (!"num1" %in% match) {
             geocode_raw_noSmallest = geocode_raw[ !geocode_raw[,tgID] %in% geocode_f[ !is.na(geocode_f[,smallestGeo]),tgID] & 
@@ -230,7 +244,7 @@ geocode <- function(toGeocode,tgID,refName,smallestGeo,geographies=c(),refCSVPat
             geocode_f = merge_and_move(geocode_f,geocode_f2,byx = tgID,byy=tgID,allx=T,ally=T,varList = c(geographies,smallestGeo,"matchType","matchNumDist","numMatches"))
             }
           }
-          geocode_f$matchGeoDist = NA 
+          
           
           
           # could also do this based on numMatches vv
@@ -255,20 +269,21 @@ geocode <- function(toGeocode,tgID,refName,smallestGeo,geographies=c(),refCSVPat
           toGeocode_sub$geocoded <- NULL
         }
         
-        # add any geographies we got to the final geocode data file, even partial ones
-        # geocode_f holds information for every case that matched at all, even if it matched to a ton of them and even if they were all above the minimum distance
-        # we want to bring int hat metadata, but have it get overwritten later by a better geocode, 
-        # but also bring in information about geographies from a non-geographic geocode that would not necessarily be overwritten
-        # make a variable holding the match
-        geocode_f$matchVars = paste(match,collapse="; ")
-        
-        geocode_f[,paste(match,collapse=".")] = as.numeric(geocode_f$numMatches)
-        geocode_f$numMatches[ is.na(geocode_f[,smallestGeo])]=NA
-        # move over all geographic data and the number of matches, for all matches
-        # matchType and matchGeoDist, matchNumDist should only exist for the perfect matches, matchVars should exist for all matches, so it will be the vars of the first time there was at least one match
-        full_geocode = merge_and_move(full_geocode, geocode_f,byx=tgID,byy=tgID,allx=T,ally=T,varList = c(geographies,smallestGeo,paste(match,collapse="."),"matchGeoDist","matchNumDist","matchType","matchVars","numMatches"))
-       
-                                                 
+        if (nrow(geocode_f)>0) {
+          # add any geographies we got to the final geocode data file, even partial ones
+          # geocode_f holds information for every case that matched at all, even if it matched to a ton of them and even if they were all above the minimum distance
+          # we want to bring int hat metadata, but have it get overwritten later by a better geocode, 
+          # but also bring in information about geographies from a non-geographic geocode that would not necessarily be overwritten
+          # make a variable holding the match
+          geocode_f$matchVars = paste(match,collapse="; ")
+          
+          geocode_f[,paste(match,collapse=".")] = as.numeric(geocode_f$numMatches)
+          geocode_f$numMatches[ is.na(geocode_f[,smallestGeo])]=NA
+          # move over all geographic data and the number of matches, for all matches
+          # matchType and matchGeoDist, matchNumDist should only exist for the perfect matches, matchVars should exist for all matches, so it will be the vars of the first time there was at least one match
+          full_geocode = merge_and_move(full_geocode, geocode_f,byx=tgID,byy=tgID,allx=T,ally=T,varList = c(geographies,smallestGeo,paste(match,collapse="."),"matchGeoDist","matchNumDist","matchType","matchVars","numMatches"))
+         
+        }                                         
       }
       else {
         
@@ -322,7 +337,7 @@ findClosestNum = function(df,smallestGeo,tgID) {
   return(list(df[which.min(temp),smallestGeo],min(temp),length(unique(df[,smallestGeo]))))
 }
           
-fuzzymatchNames = function(df, reference,referenceType,fuzzyMatch=Inf,fuzzyMatchDBPath="") {
+fuzzymatchNames = function(df, reference,referenceType="df",fuzzyMatch=Inf,fuzzyMatchDBPath="") {
   # get reference df
   if (referenceType == "path") {
     reference = read.csv(reference,stringsAsFactors=F)    

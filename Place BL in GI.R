@@ -4,8 +4,8 @@
 bl= read.csv("Downloads/BL - June.csv",stringsAsFactors=F)
 landParcelsPath = "/Users/henrygomory/Documents/Research/BARI/Git/New-BARI/Geographical Infrastructure 2017/LandParcels.2017.csv"
 roadsPath  = "Documents/Research/BARI/Geographic Infrastructure/Geographical Infrastructure 2015/Roads 2015/roads_updated.csv"
-
-
+samPath = "/Users/henrygomory/Documents/Research/BARI/Git/New-BARI/Geographical Infrastructure 2017/sam_wGeos.csv"
+fuzzyMatchDBPath = "/Users/henrygomory/Documents/Research/BARI/Git/New-BARI/Functions/fuzzyMatchDB.csv"
 # clean business license file, needs "Cleaning functions.R"
 # this would be improved by incorporating litpostal, but I don't think it would make a large difference on the end product, though I could be wrong
 bl$street_c = clean_streetName(bl$STNAME)
@@ -45,6 +45,13 @@ geocode_lp = geocode(toGeocode = bl_sample,tgID = "uniqueGeocodeID",refName = "L
 geocode_r = geocode(toGeocode = bl_sample,tgID = "uniqueGeocodeID",refName = "Roads",smallestGeo = "TLID",maxNumDistance = 10,fuzzyMatching = T,
                      geographies = c("BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"), refCSVPath = roadsPath)
 
+
+geocode_s = geocode(toGeocode = bl_sample, tgID = "uniqueGeocodeID",refName = "Sam",smallestGeo = "Land_Parcel_ID",maxNumDistance = 40,fuzzyMatching = T,fuzzyMatchDBPath = fuzzyMatchDBPath,
+                    geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"), refCSVPath = samPath)
+
+#Error in `$<-.data.frame`(`*tmp*`, "matchNumDist", value = NA) : 
+#  replacement has 1 row, data has 0
+
 # with the geocoding done, now we can incorporate the geographic data
 # this adds all of the geographic indicators, including Land_Parcel_ID, X, and Y, but only for perfect matches
 bl_sample_geo = merge(bl_sample,geocode_lp[ geocode_lp$matchType=="Unique" |  (geocode_lp$matchType == "Number" &  geocode_lp$matchNumDist==0) ,
@@ -55,9 +62,12 @@ bl_sample_geo = merge_and_move(bl_sample_geo,geocode_r,byx="uniqueGeocodeID",byy
 bl_sample_geo = merge_and_move(bl_sample_geo,geocode_lp[! (geocode_lp$matchType=="Unique" |  (geocode_lp$matchType == "Number" &  geocode_lp$matchNumDist==0)),],
                                byx="uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=T,varList =c("TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"))
 
+bl_sample_geo = merge(bl_sample, geocode_s[,c("uniqueGeocodeID","Land_Parcel_ID","X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD")],by="uniqueGeocodeID",all.x=T)
+
 # this checks how good the geocode was. in two trials i got 77.5% and 78.6% for Land_Parcel_ID, and 96.5% and 97.0% for TLID
 sum(!is.na(bl_sample_geo$Land_Parcel_ID))/nrow(bl_sample_geo)
 sum(!is.na(bl_sample_geo$TLID))/nrow(bl_sample_geo)
+sum(!is.na(bl_sample_geo$CT_ID_10))/nrow(bl_sample_geo)
 
 
 # adds on the others and writes
