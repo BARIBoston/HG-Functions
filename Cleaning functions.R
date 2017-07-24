@@ -67,7 +67,8 @@ standardizeGeoNames <- function(df) {
 }
 
 clean_unit = function(unit, num = NA) {
-  unit_c = trim(gsub("#|APT|UNIT|STE","",toupper(unit)))
+  
+  unit_c = trim(gsub("^#|^APT|^UNIT|^STE","",trim(toupper(unit))))
   
   # get rid of street numbers in unit
   if (sum(!is.na(num)) > 0 ) {
@@ -92,6 +93,10 @@ clean_unit = function(unit, num = NA) {
   unit_c = gsub(" - | -|- ","-",unit_c)
   unit_c = gsub("((?<=[0-9])(-| )(?=[A-Z]))|((?<=[A-Z])(-| )(?=[0-9]))","",unit_c,perl = T)
   unit_c[ !is.na(as.numeric(unit_c))] = as.numeric(unit_c)[!is.na(as.numeric(unit_c))]
+  
+  # East or West at the end
+  unit_c = gsub("EAST$|E.$","E",unit_c)
+  unit_c = gsub("WEST$|W.$","E",unit_c)
   return(unit_c) 
 }
 

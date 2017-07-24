@@ -32,7 +32,7 @@ prepareFileToGeocode = function(toGeocode,fuzzyMatching,reference,fuzzyMatchDBPa
   toGeocode$num1 = clean_num(toGeocode$num1)[,2]
   toGeocode$num2 = clean_num(toGeocode$num2)[,2]
   toGeocode$street_c = clean_streetName(toGeocode$street_c)
-  toGeocode$unit_c = clean_unit(unit = toGeocode$unit_c, num = toGeocode$num1)
+  toGeocode$unit_c = (clean_unit(unit = toGeocode$unit_c, num = toGeocode$num1))
   toGeocode$suffix_c = clean_suffix(toGeocode$suffix_c)
   toGeocode$zip_c = clean_zip(toGeocode$zip_c)
   toGeocode$city_c = clean_city(toGeocode$city_c)
@@ -392,9 +392,11 @@ geocode <- function(toGeocode,tgID,refName,smallestGeo,geographies=c(),refCSVPat
     } else {
       full_geocode = rbind(full_geocode,full_geocode_sub)
     }
-    print(paste(toRow,"/",nrow(toGeocode)," geocoded. ",sum(!is.na(full_geocode[[smallestGeo]])),"/",toRow," fully geocoded.",sep=""))
+    print(paste(toRow,"/",nrow(toGeocode)," processed. ",sum(!is.na(full_geocode[[smallestGeo]])),"/",toRow," fully geocoded.",sep=""))
   }
   #return the geocoded file and the original file
+  full_geocode$fm_type = ifelse(!is.na(full_geocode$fm_type),full_geocode$fm_type,
+                                ifelse(rowSums(full_geocode[,unlist(lapply(matches,FUN = function(x){paste(x[[1]],collapse="; ")}))])>0,"Non-Unique matches","No matches"))
   print("Finished geocode: ")
   print(table(full_geocode$fm_vars,full_geocode$fm_type,useNA = "always"))
   
@@ -540,7 +542,7 @@ getReferenceFile = function(refName,weirdRange=F,buffer=0,fullRange=F,oddsAndEve
     reference_raw$suffix_c = clean_suffix(reference_raw$suffix_c)
     reference_raw$zip_c = clean_zip(reference_raw$zip_c)
     reference_raw$city_c = clean_city(reference_raw$city_c)
-    reference_raw$unit_c = clean_unit(reference_raw$unit_c,reference_raw$num1)
+    reference_raw$unit_c = (clean_unit(reference_raw$unit_c,reference_raw$num1))
     reference_raw$ReferenceID = reference_raw$SAM_ADDRESS_ID
   } else {
     print("REFERENCE NAME NOT FOUND")
