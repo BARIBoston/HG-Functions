@@ -66,6 +66,34 @@ standardizeGeoNames <- function(df) {
   return(df)
 }
 
+clean_unit = function(unit, num = NA) {
+  unit_c = trim(gsub("#|APT|UNIT|STE","",toupper(unit)))
+  
+  # get rid of street numbers in unit
+  if (sum(!is.na(num)) > 0 ) {
+    badUnits_cond = (is.na(as.numeric(unit_c)) | as.numeric(unit_c) != unit_c) & (unit_c != "" & !is.na(unit_c))
+    if (sum(badUnits_cond)>0) {
+      badUnits = data.frame(num =   num[badUnits_cond], unit = unit_c[ badUnits_cond],stringsAsFactors = F)
+      for (i in c(1:nrow(badUnits))) {
+        # if the street number is big it removes it regardless
+        if (nchar(badUnits$num[i])>1) {
+          badUnits$unit[i] = gsub(paste("^",badUnits$num[i],"-? ?",sep=""),"",badUnits$unit[i],perl = T)
+          # but if it's small it might be the floor number, so the regex checks some other stuff
+        } else {
+          badUnits$unit[i] = gsub(paste("^",badUnits$num[i],"(-| )|^",badUnits$num[i],"(?=[A-Z] ?-?[0-9])",sep=""),"",badUnits$unit[i],perl = T)
+        }
+        if(i%%1000==0){print(i)}
+      }
+      unit_c[badUnits_cond] = badUnits$unit  
+    }
+  }
+  # removes spaces and hyphens if it's not a number or a letter on both sides (1-2--->1-2; 1-A--->1A)
+  unit_c = gsub(" {2,}"," ",unit_c)
+  unit_c = gsub(" - | -|- ","-",unit_c)
+  unit_c = gsub("((?<=[0-9])(-| )(?=[A-Z]))|((?<=[A-Z])(-| )(?=[0-9]))","",unit_c,perl = T)
+  unit_c[ !is.na(as.numeric(unit_c))] = as.numeric(unit_c)[!is.na(as.numeric(unit_c))]
+  return(unit_c) 
+}
 
 # cleans a vector of number strings of the format: c("3","5", "3-5","3 5","3A","3-5A",etc.)
 clean_num <- function(number) {

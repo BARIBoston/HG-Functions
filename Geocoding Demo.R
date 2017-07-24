@@ -39,12 +39,27 @@ sum(!duplicated(permits_sub$PermitNumber))
 
 toGeocode = permits_sub[ !duplicated(permits_sub$PermitNumber),]
 
+toGeocode.shp = toGeocode[ !is.na(toGeocode$X),]
+coordinates(toGeocode.shp) = ~X+Y 
+proj4string(toGeocode.shp) = "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+
 # geocode against land parcels, without geographic data
-geocoded.lp.nogeo =  geocode(toGeocode = toGeocode,tgID = "PermitNumber",
-                             refName = "LandParcels",smallestGeo = "Land_Parcel_ID",expand=T,
-          geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"),
-          refCSVPath = landParcels_path)
-table(geocoded.lp.nogeo$matchType)
+geocoded.lp.nogeo =  geocode(toGeocode = toGeocode, tgID = "PermitNumber",refName = "LandParcels",smallestGeo = "Land_Parcel_ID",
+                             geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"),refCSVPath = landParcels_path,
+                             matches = list(
+                               list(c("street_c","num1","suffix_c","zip_c"),10,NA),
+                               list(c("street_c","num1","suffix_c","city_c"),10,NA),
+                               list(c("street_c","num1","suffix_c"),10,NA),
+                               list(c("street_c","suffix_c","city_c"),10,NA),
+                               list(c("street_c","suffix_c","zip_c"),10,NA),
+                               list(c("street_c","num1","city_c"),10,NA),
+                               list(c("street_c","suffix_c"),10,NA),
+                               list(c("street_c","num1"),10,NA),
+                               list(c("street_c","zip_c"),10,NA),
+                               list(c("street_c","city_c"),10,NA),
+                               list(c("street_c"),10,NA)))
+
 
 
 
@@ -107,19 +122,25 @@ geocoded.lp.nogeo3 = geocode(toGeocode = toGeocode[ is.na(toGeocode$Land_Parcel_
 toGeocode = merge_and_move(toGeocode,geocoded.lp.nogeo3,byx="PermitNumber",byy="PermitNumber",allx=T,ally=T,varList = c("CT_ID_10"))
 
 
-
-toGeocode.shp = toGeocode[ !is.na(toGeocode$X),]
-coordinates(toGeocode.shp) = ~X+Y 
-proj4string(toGeocode.shp) = "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
-
-
 #geocode against land parcels, with geographic data
-geocoded.lp.geo = geocode(toGeocode = toGeocode.shp[ toGeocode.shp@data$PermitNumber %in% toGeocode$PermitNumber[ is.na(toGeocode$Land_Parcel_ID)],],
+geocoded.lp.geo = geocode(toGeocode = toGeocode, toGeocodeShp=toGeocode.shp,
                           tgID = "PermitNumber",refName = "LandParcels",smallestGeo = "Land_Parcel_ID",
-          geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"),xy=T,maxGeoDistance=40,
+          geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"),
           refShpPath = landParcelsShpPath,
           refShpName = landParcelsShpName,
-          refCSVPath = landParcels_path)
+          refCSVPath = landParcels_path,
+          matches = list(
+            list(c("street_c","num1","suffix_c","zip_c"),10,NA),
+            list(c("street_c","num1","suffix_c","city_c"),10,NA),
+            list(c("street_c","num1","suffix_c"),10,NA),
+            list(c("street_c","suffix_c","city_c"),NA,40),
+            list(c("street_c","suffix_c","zip_c"),NA,40),
+            list(c("street_c","num1","city_c"),NA,40),
+            list(c("street_c","suffix_c"),NA,40),
+            list(c("street_c","num1"),NA,20),
+            list(c("street_c","zip_c"),NA,40),
+            list(c("street_c","city_c"),NA,40),
+            list(c("street_c"),NA,10)))
 toGeocode = merge_and_move(toGeocode,geocoded.lp.geo,byx="PermitNumber",byy="PermitNumber",allx=T,ally=T,varList = c("Land_Parcel_ID","CT_ID_10"))
 
 sum(!is.na(toGeocode$Land_Parcel_ID))/nrow(toGeocode)
@@ -151,7 +172,49 @@ geocoded.s.nogeo =  geocode(toGeocode = toGeocode,tgID = "PermitNumber",fuzzyMat
 table(geocoded.s.nogeo$matchType)
 
 
+###
+
+
+toGeocode = toGeocode
+tgID = "PermitNumber"
+refName = "LandParcels"
+smallestGeo = "Land_Parcel_ID"
+geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD")
+refCSVPath = landParcels_path
+weirdRange=F
+fullRange=F
+oddsAndEvens=T
+buffer=0
+maxGeoDistance = Inf
+maxNumDistance = 10
+expand = T
+xy = F
+refShpPath = ""
+refShpName = ""
+fuzzyMatching = T
+fuzzyMatchDBPath ="/Users/henrygomory/Documents/Research/BARI/Git/New-BARI/Functions/fuzzyMatchDB.csv"
+batchSize = 3000
+planarCRS = "+init=epsg:32619 +units=m"
+matches = list(
+  list(c("street_c","num1","suffix_c","zip_c"),10,NA), # first NA is num, second is geo
+  list(c("street_c","num1","suffix_c","city_c"),10,NA),
+  list(c("street_c","num1","suffix_c"),10,NA),
+  list(c("street_c","suffix_c","city_c"),NA,40),
+  list(c("street_c","suffix_c","zip_c"),NA,40),
+  list(c("street_c","num1","city_c"),NA,40),
+  list(c("street_c","suffix_c"),NA,NA),
+  list(c("street_c","num1"),NA,NA),
+  list(c("street_c","zip_c"),NA,NA),
+  list(c("street_c","city_c"),NA,NA),
+  list(c("street_c"),NA,NA))
 
 
 
+#
+
+refShpPath = landParcelsShpPath
+refShpName = landParcelsShpName
+refCSVPath = landParcels_path
+
+toGeocodeShp = toGeocode.shp
 
