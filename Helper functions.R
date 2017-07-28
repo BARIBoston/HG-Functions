@@ -92,97 +92,118 @@ check_geo <- function(x) {
   }
 }
 
-placeInGI = function(df,IDConnectorPath,fuzzyMatching=T,projection = "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0",
+placeInGI = function(df,IDConnectorPath,fuzzyMatching=F,fuzzyMatchDBPath="",projection = "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0",
                      landParcelsPath,landParcelsShpName="",landParcelsShpPath="",
                      roadsPath="",roadsShpPath="",roadsShpName="",
+                     samPath="",
                      blkShpPath="", blkShpName="",
                      bgShpPath="", bgShpName="",
                      ctShpPath="", ctShpName="") {
   geoVars = c("Land_Parcel_ID","X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD")
+  # remove old geographic data from df
   for (var in geoVars) { df[,var] = NA}
   df$geoType = NA
   
   df = standardizeGeoNames(df)
+  # make unique ID
   df$uniqueGeocodeID = row.names(df)
   
+  # reads in ID connector and attaches geo data
   IDconnector = read.csv(IDConnectorPath,stringsAsFactors=F)
   landParcels = read.csv(landParcelsPath,stringsAsFactors=F)
   landParcels$TLID = landParcels$TLID_1
   IDconnector.geo = merge(IDconnector, landParcels,by="Land_Parcel_ID",all.x=T)
   
-  # Property_ID
-  ##############
+  # attempts to connect geographic data based on Property_ID
   if ("Property_ID" %in% names(df)) {
     df = merge_and_move(df,
                         IDconnector.geo[!duplicated(IDconnector.geo$Property_ID),],
-                        byx = "Property_ID",byy="Property_ID",allx=T,
+                        byx = "Property_ID",allx=T,
                         varList=geoVars)
     df$geoType[is.na(df$geoType)&!is.na(df$Land_Parcel_ID)] = "Property_ID"
     print("Property_ID")
   } else {print("No Property_ID")}
   
-  # Parcel_num
-  ##############  
+  # attempts to connect geographic data based on parcel_num
   if ("parcel_num" %in% names(df)) {
     df = merge_and_move(df,
                         IDconnector.geo[!duplicated(IDconnector.geo$parcel_num),],
-                        byx = "parcel_num",byy="parcel_num",allx=T,
+                        byx = "parcel_num",allx=T,
                         varList=geoVars)  
     df$geoType[is.na(df$geoType)&!is.na(df$Land_Parcel_ID)] = "parcel_num"
-    print(table(df$geoType))
     print("parcel_num")
   } else {print("No parcel_num")}
   
-  # GIS_ID
-  ##############  
+  # attempts to connect geographic data based on GIS_ID (very unlikely to do much beyond parcel_num)
   if ("GIS_ID" %in% names(df)) {
     df = merge_and_move(df,
                         IDconnector.geo[!duplicated(IDconnector.geo$GIS_ID),],
-                        byx = "GIS_ID",byy="GIS_ID",allx=T,
+                        byx = "GIS_ID",allx=T,
                         varList=geoVars)
     df$geoType[is.na(df$geoType)&!is.na(df$Land_Parcel_ID)] = "GIS_ID"
     print("GIS_ID")
   }  else {print("No GIS_ID")}
   
-  # setting up shpfile
-  ##############  
-  
+  # creates shapefile for geographic geocoding
   if (sum(c("lat","lng") %in% names(df))==2) {
     df.shp = df[ !is.na(df$lat),]
     coordinates(df.shp) = ~lng+lat 
     proj4string(df.shp) = projection
   }
   
-  # Geocoding
-  ##############  
+  # attemptes to connect geographic data based on geocode
   if (sum(c("num1","num2","street_c","suffix_c","zip_c","city_c") %in% names(df))==6) {
-    if (fuzzyMatching) {
-      df = fuzzymatchNames(df,refPath = landParcelsPath)
-    }
-    
+    # SAM NO GEO
+    #############
+      if (samPath!="") {
+        geocoded.s.ng = geocode(toGeocode =df[ is.na(df$Land_Parcel_ID),],tgID = "uniqueGeocodeID",refName = "Sam",smallestGeo = "Land_Parcel_ID",fuzzyMatching = fuzzyMatching,fuzzyMatchDBPath = fuzzyMatchDBPath,
+                                geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"), refCSVPath = samPath)
+        df = merge_and_move(df,
+                            geocoded.s.ng,
+                            byx = "uniqueGeocodeID",allx=T,
+                            varList=geoVars)
+        print("Geocode - Sam no geo")
+      
+      } else {
+        print("Sam path not found")
+      }
+      
     # LP NO GEO
     ###########
-    geocoded.lp.ng = geocode(toGeocode = df[ is.na(df$Land_Parcel_ID),],tgID = "uniqueGeocodeID",refName = "LandParcels",smallestGeo = "Land_Parcel_ID",
+    geocoded.lp.ng = geocode(toGeocode = df[ is.na(df$Land_Parcel_ID),],tgID = "uniqueGeocodeID",refName = "LandParcels",smallestGeo = "Land_Parcel_ID",fuzzyMatching = fuzzyMatching,fuzzyMatchDBPath = fuzzyMatchDBPath,
                        geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"), refCSVPath = landParcelsPath)
     df = merge_and_move(df,
                         geocoded.lp.ng,
-                        byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=F,
+                        byx = "uniqueGeocodeID",allx=T,
                         varList=geoVars)
     
-    print("Geocode - lp no geo")
+    print("Geocoded - lp no geo")
     
     # LP WITH GEO
     #############
     if (sum(c("lat","lng") %in% names(df))==2 & landParcelsShpPath!="" & landParcelsShpName!="") {
       
-      geocoded.lp.g = geocode(toGeocode = df.shp[ df.shp@data$uniqueGeocodeID %in% df$uniqueGeocodeID[ is.na(df$Land_Parcel_ID)],],tgID = "uniqueGeocodeID",refName = "LandParcels",smallestGeo = "Land_Parcel_ID",
-              geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"),maxGeoDistance=50,
-              xy=T, refCSVPath = landParcelsPath,refShpPath = landParcelsShpPath,refShpName = landParcelsShpName)
+      geocoded.lp.g = geocode(toGeocode = df[ is.na(df$Land_Parcel_ID),],toGeocodeShp = df.shp[ df.shp@data$uniqueGeocodeID %in% df$uniqueGeocodeID[ is.na(df$Land_Parcel_ID)],],tgID = "uniqueGeocodeID",refName = "LandParcels",smallestGeo = "Land_Parcel_ID",
+              geographies = c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"),fuzzyMatching = fuzzyMatching,fuzzyMatchDBPath = fuzzyMatchDBPath,
+              refCSVPath = landParcelsPath,refShpPath = landParcelsShpPath,refShpName = landParcelsShpName,
+              matches = list(
+                list(c("street_c","num1","suffix_c","zip_c"),NA,40),
+                list(c("street_c","num1","suffix_c","city_c"),NA,40),
+                list(c("street_c","num1","suffix_c"),NA,40),
+                list(c("street_c","suffix_c","city_c"),NA,40),
+                list(c("street_c","suffix_c","zip_c"),NA,40),
+                list(c("street_c","num1","city_c"),NA,40),
+                list(c("street_c","suffix_c"),NA,40),
+                list(c("street_c","num1"),NA,40),
+                list(c("street_c","zip_c"),NA,40),
+                list(c("street_c","city_c"),NA,40),
+                list(c("street_c"),NA,40)))
+      
       df = merge_and_move(df,
                           geocoded.lp.g,
-                          byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=T,
+                          byx = "uniqueGeocodeID",allx=T,
                           varList=geoVars)
-      print("Geocode - lp with geo")
+      print("Geocoded - lp with geo")
       
     } else { print("Lat/Lng vars or land parcels shapefile path not found")}
     
@@ -191,11 +212,11 @@ placeInGI = function(df,IDConnectorPath,fuzzyMatching=T,projection = "+proj=long
     #############
     if (roadsPath!="") {
       
-      geocoded.r.ng = geocode(toGeocode =df[ is.na(df$Land_Parcel_ID),],tgID = "uniqueGeocodeID",refName = "Roads",smallestGeo = "TLID",
+      geocoded.r.ng = geocode(toGeocode =df[ is.na(df$Land_Parcel_ID),],tgID = "uniqueGeocodeID",refName = "Roads",smallestGeo = "TLID",fuzzyMatching = fuzzyMatching,fuzzyMatchDBPath = fuzzyMatchDBPath,
                          geographies = c("BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"), refCSVPath = roadsPath)
       df = merge_and_move(df,
                           geocoded.r.ng,
-                          byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=T,
+                          byx = "uniqueGeocodeID",allx=T,
                           varList=c("TLID","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"))
       print("Geocode - roads no geo")
       
@@ -204,31 +225,30 @@ placeInGI = function(df,IDConnectorPath,fuzzyMatching=T,projection = "+proj=long
       #############
       if (sum(c("lat","lng") %in% names(df))==2 & roadsShpPath!="" & roadsShpName!="") {
         
-        geocoded.r.g = geocode(toGeocode =df.shp[ df.shp@data$uniqueGeocodeID %in% df$uniqueGeocodeID[ is.na(df$Land_Parcel_ID)],],
-                               tgID = "uniqueGeocodeID",refName = "Roads",smallestGeo = "TLID",maxGeoDistance=50,
+        geocoded.r.g = geocode(toGeocode =df[ is.na(df$Land_Parcel_ID),],toGeocodeShp = df.shp[ df.shp@data$uniqueGeocodeID %in% df$uniqueGeocodeID[ is.na(df$Land_Parcel_ID)],],fuzzyMatching = fuzzyMatching,fuzzyMatchDBPath = fuzzyMatchDBPath,
+                               tgID = "uniqueGeocodeID",refName = "Roads",smallestGeo = "TLID",
                 geographies = c("BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"),
-                xy=T, refCSVPath = roadsPath,refShpPath = roadsShpPath,refShpName = roadsShpName)
+                refCSVPath = roadsPath,refShpPath = roadsShpPath,refShpName = roadsShpName,
+                matches = list(
+                  list(c("street_c","num1","suffix_c","zip_c"),NA,40),
+                  list(c("street_c","num1","suffix_c","city_c"),NA,40),
+                  list(c("street_c","num1","suffix_c"),NA,40),
+                  list(c("street_c","suffix_c","city_c"),NA,40),
+                  list(c("street_c","suffix_c","zip_c"),NA,40),
+                  list(c("street_c","num1","city_c"),NA,40),
+                  list(c("street_c","suffix_c"),NA,40),
+                  list(c("street_c","num1"),NA,40),
+                  list(c("street_c","zip_c"),NA,40),
+                  list(c("street_c","city_c"),NA,40),
+                  list(c("street_c"),NA,40)))
         df = merge_and_move(df,
                             geocoded.r.g,
-                            byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=T,
+                            byx = "uniqueGeocodeID",allx=T,
                             varList=c("TLID","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"))
         print("Geocode - roads with geo")
         
       }  else { print("Lat/Lng vars or roads shapefile path not found")}
-    } else { print("Roads path not found")}
-  
-    # LPs less precise
-    #############
-    geocoded.lp.ng.2 = geocode(toGeocode = df[ is.na(df$Land_Parcel_ID),],tgID = "uniqueGeocodeID",maxNumDistance = 10, fullRange = T,oddsAndEvens = F,
-                                 refName = "LandParcels",smallestGeo = "Land_Parcel_ID",expand=T,
-                                 geographies = c("TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"),
-                                 refCSVPath = landParcels_path)
-    df = merge_and_move(df,
-                        geocoded.lp.ng.2,
-                       byx = "uniqueGeocodeID",byy="uniqueGeocodeID",allx=T,ally=T,
-                       varList=c("TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD"))
-    print("Geocode - lp less precise no geo")
-    
+    } else { print("Roads path not found")}  
       
     df$geoType[is.na(df$geoType)&!is.na(df$Land_Parcel_ID)] = "Geocode"
   } else { print("Street address vars not found")}
@@ -274,7 +294,7 @@ placeInGI = function(df,IDConnectorPath,fuzzyMatching=T,projection = "+proj=long
     } else { print("CTs not found")}
   }
  
-  
+  print(table(df$geoType))
   df$uniqueGeocodeID = NULL
   return(df)
   

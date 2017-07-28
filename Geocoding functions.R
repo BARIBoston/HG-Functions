@@ -1,11 +1,256 @@
+# Henry Gomory - July 27, 2017
+
 library(rgeos)
 library(dplyr)
 library(maptools)
 library(rgdal)
 library(stringdist)
-#--------------------------------------#
-#         Geocoder                     #
-#--------------------------------------#
+
+############
+# OVERVIEW #
+############
+# This geocoder assigns geographic data from a reference dataset to rows in a "toGeocode" dataset, based on matches between components of a street address
+# The components of the street address are num1, num2, street_c, suffix_c, unit_c, zip_c, city_c. 
+
+# First, the geocoder gets a reference dataset, based on refName. It is either the land parcels, roads, or sam file
+    # this could be very easily altered to include more datasets or a generic one. 
+    # that dataset has expanded out its addresses from 1-5 Maple St. to 3 rows: 1, 3, 5 Maple St., so that all possible matches are made
+    # if geographic matching is enabled, a corresponding shapefile must be included as well
+# A series of merges are then attempted based on the matches argument.
+    # if the default list of matches is specified, first it merges based on street_c, num1, suffix_c, and zip_c, then it tries with city instead of zip, etc. 
+    # this generates "rawMatches" which are then processed into real data
+    # if numer differences are specified, then imperfect matches between numbers are allowed in the raw match, deferring to the smallest difference
+# If a value of tgID is matched to only only one smallestGeo, that is deemed a unique match
+    # if there is no unique match, if geographic matching is enabled then out of these matches, the one that is geographically closest is chosen
+    # otherwise, for each geography, the geocoder checks whether there is a unique value of that geography among the matches
+    # for example, if there are ten land parcels that match to an address but they all have the same tract ID or street segment ID, then those geographies are captured
+    # if a unique match or geo match is found, then no other matches are attempted for that entry
+# after iterating through all of the types of matches, the geocoder returns a data frame with an entry for all of the items, geographic data, and information about the results
+  
+#############
+# ARGUMENTS #
+#############
+# Important arguments
+    # toGeocode: the data frame to be gecoded. must include some of the street address components (num1, num2, street_c, suffix_c, unit_c, zip_c, city_c)
+            # the street address components can be created using the cleaning functions 
+        # toGeocodeShp is a spatial object that is used for geographic matches. If geographic matching is enabled such an object must be provided. 
+            # toGeocodeShp must hold the tgID in its @data slot, and tgID MUST BE UNIQUE FOR THE SHPFILE
+    # tgID: ID for the data frame. Records will be returned with this as a unique ID. 
+            # It does not need to be unique in the toGeocode data frame. but if it is not, then two records with the same ID will be treated as one
+            # Accordingly, if they have different street addresses, it will be very unlikely that a unique match is found for them
+    # refName: the database to match to, can either be "Roads","Sam", or "LandParcels". The refpaths (below) must correspond to the database indicated in refName.
+        # refCSVPath: a path to the CSV file holding the reference file. The file must have at least some of the street address components.
+        # refShpPath: a path to the folder of the shapefile holding the reference shape file (only needed for geographic matches)
+        # refShpName: the name of the shapefile in the folder indicated by refShpPath (only needed for geographic matches)
+    # smallestGeo: the smallest geography. a variable within the reference file. 
+            # If a unique value of smallestGeo is found for a row in toGeocode, then it is deemed geocoded and no more matches are attempted.
+            # 99% of the time this should be TLID for roads, Land_Parcel_ID for LandParcels, and either SAM_ADDRESS_ID (Property_ID) or Land_Parcel_ID for Sam
+    # geographies: a vector of column names of geographic variables you want to find out about through the geocoding
+            # typically: c("X","Y","TLID","Blk_ID_10","BG_ID_10","CT_ID_10","NSA_NAME","BRA_PD")
+            # all of the geographies must exist in the reference file
+    # matches: this is a list of sets of variables to match on, as described in the overview. the matches are tried in order, so the stricter matches should be placed first
+            # each element of the matches list has three values: a vector and then two values, each either NA or a number
+            # the first NA or number is the maximum difference allowed between numbers in an address that will still be counted as a match
+            # if it is zero or NA, then only exact matches will be allowed 2 Maple St. -> 2 Maple St.
+            # however, a value of 4 will allow matches like 2 Maple St. -> 6 Maple St., but choosing the match with the smallest difference
+            # the second NA or number is the maximum geographic difference allowed between matches. 
+            # when the geocoder chooses between matches based on geography it will throw out any matches where the distance is too high, as described above
+            # including a value for the second number for any match enables the geographic matching mode
+    # fuzzyMatching: whether fuzzy matching should be used to match streets, requires human oversight
+    # fuzzyMatchDBPath: a path to a csv file that holds previously-decided fuzzy matching decisions. it will be saved again with new decisions after. 
+            # requires variables: street1, street2, decision. 
+
+# Less-important arguments
+    # expand: determines whether a range of values in toGeocode should all be attempted. So if toGeocode is 1-5, 1, 3, and 5 will be attempted
+            # should almost always be True
+    # weirdRange: this determines whether number combinations like 25-3 (num1 = 25, num2 = 3) should be interpreted as 3-25, thus expanding to 3, 5, 7...
+            # this should almost always be False, since those combinations are almost always street numbers then apartment units
+    # fullRange: when expanding the addresses in the reference file, determines whether 1-5 should be expanded to 1, 3, 5 or 1, 2, 3, 4, 5
+            # this is especially important when geocoding to roads
+            # i think the best way to use this is to first geocode with it off, then geocode the remains with it on
+            # if you are doing geographic matches it doesn't matter so much, because it will match based on street and then find the closest
+            # likewise, it doesn't matter so much if you are doing inexact number matches
+    # oddsAndEvens: very minor, used when expanding the addresses in the reference file, determines whether the two numbers need to be the same sign
+            # if enabled, 2-5 changes to 2-4
+    # buffer: also very minor, used when expanding addresses in the reference file, if it is 2, 3-7 will expand to 1, 3, 5, 7, 9, allowing for close matches
+            # this was originally implemented before the imperfect number matches and so is not very useful now. This is less useful because it does not defer to the closest match
+            # it could be useful if you want to check for a subset that don't match whether all of the addresses that are close to it match on some geograhpy
+            # for example, you might only want to match to a street segment if all of the addresses within 10 of your target have the same street, rather than 
+            # just finding the closest address and taking its street segment ID (realistically i don't know if i would ever really do this)
+    # batchSize: the number of toGeocode cases that are geocoded in a batch. 3000 is the default size because larger ones made my computer crash. 
+            # can be increased based on computer power
+    # planarCRS: the CRS to be used for geographical matches. 
+  
+
+
+##########
+# OUTPUT #
+##########
+
+# Output during the geocoding
+    # the geocoder prints some status updates as it progresses
+    # fuzzy matches are printed and if they have not been encountered before they require user input
+    # many problems are checked for and if they are encountered the function will exit
+    # if a large number of addresses are being geocoded, the geocoder will work through them in batches. 
+    # after each bath, the number processes and the number fully geocoded will be printed
+    # fully geocoded means that a unique value for smallestGeo has been attached to the address being geocoded
+    # a table of the number of full geocodes that came from each type of match is printed
+    # this is a cross tabulation of the two fields fm_type and fm_vars
+
+# the output object 
+    # the returned object has a row for every unique value of tgID, whether or not a match was found
+    # the first column is the ID specified in the field tgID
+    # next is smallestGeo then the geographies
+    # next is fm_type, which is an important variable summarizing the match
+        # Unique means that a unique value for smallestGeo was found in the reference file, this is the best type of match
+        # Geo means that although no unique reference item was found based on the matches, we found the geographically-closest one that matched
+        # Non-Unique matches means that some matches were found, but we couldn't narrow it to a single item in the reference file. There may still be extensive geographic
+            # information for these records, just no definitive "smallestGeo"
+        # No matches means that in all of the types of matches attempted, none of them had any matches - this suggests that the record is either junky or not in Boston
+    # fm_vars: the list of variables on which the match that found the item was made. It only exists for matches with fm_type == Unique or Geo
+    # fm_numMatches: the number of matches that were narrowed down to a single one for a match that found smallestGeo. This is relevant only for geo matches because it must be 1 for all others or NA if no full match was found
+    # fm_numDiff: the difference between numbers in a full match that used numbers
+    # fm_geoDiff: the geographic distance in a geo match
+    # next is a column for each combination of variables that were matched on, with the number of matches found using those variables
+        # some are 0 because an earlier match was completely successful, and so the match was not attempted
+
+
+geocode <- function(toGeocode,tgID,refName,smallestGeo,geographies=c(),refCSVPath,
+                    toGeocodeShp = NA, weirdRange=F,fullRange=F,oddsAndEvens=T,buffer=0, expand = T,
+                    refShpPath = NA, refShpName = NA, fuzzyMatching = F,fuzzyMatchDBPath =NA, batchSize = 3000,planarCRS = "+init=epsg:32619 +units=m",
+                    matches = list(
+                      list(c("street_c","num1","suffix_c","zip_c"),NA,NA), # first NA is num, second is geo
+                      list(c("street_c","num1","suffix_c","city_c"),NA,NA),
+                      list(c("street_c","num1","suffix_c"),NA,NA),
+                      list(c("street_c","suffix_c","city_c"),NA,NA),
+                      list(c("street_c","suffix_c","zip_c"),NA,NA),
+                      list(c("street_c","num1","city_c"),NA,NA),
+                      list(c("street_c","suffix_c"),NA,NA),
+                      list(c("street_c","num1"),NA,NA),
+                      list(c("street_c","zip_c"),NA,NA),
+                      list(c("street_c","city_c"),NA,NA),
+                      list(c("street_c"),NA,NA))) {
+  
+  # Part of a series of little messages, since geocoding can take a while
+  print("Starting geocoder")
+  
+  # doing some manipulations of the arguments
+  xy = (sum(!is.na(lapply(matches,'[[',3)))>0)
+  if (length(geographies)==0 | (length(geographies == 1) & smallestGeo %in% geographies)) {
+    geographies = c()
+  } else {
+    geographies = setdiff(geographies,smallestGeo)
+  }
+  
+  # doing an initial check of the arguments
+  if (!initialCheck(xy = xy,refShpPath = refShpPath,refShpName = refShpName,toGeocodeShp = toGeocodeShp,toGeocode = toGeocode,refName = refName,tgID = tgID)){return(NA)}
+  
+  # this returns the data frame that will be geocoded again
+  print("Loading reference files")
+  reference = getReferenceFile(refName = refName,weirdRange=weirdRange,buffer=buffer,fullRange=fullRange,refCSVPath = refCSVPath,oddsAndEvens=oddsAndEvens)
+  
+  # if xy, get reference shp and make sure toGeocodeShp is in correct projection
+  if (xy) {
+    referenceShp = getReferenceShpFile(refShpPath = refShpPath,refShpName = refShpName,planarCRS = planarCRS,refName =refName)
+    # projection is changed to planar in order to do gDistance
+    toGeocodeShp = spTransform(toGeocodeShp,CRS(planarCRS))
+  } else {
+    referenceShp = NA
+    toGeocodeShp = NA
+  }
+  print("   Reference loaded")
+  
+  toGeocode = prepareFileToGeocode(toGeocode = toGeocode,fuzzyMatching = fuzzyMatching,reference = reference,fuzzyMatchDBPath = fuzzyMatchDBPath)
+  
+  if(!secondaryCheck(smallestGeo = smallestGeo,referenceShp = referenceShp,toGeocodeShp = toGeocodeShp,geographies = geographies,reference = reference,tgID = tgID,matches = matches,toGeocode = toGeocode,xy=xy)) {return(NA)}
+  
+  print("Starting geocoding")
+  # iterating in batches of 3000
+  base = 1
+  while (base < nrow(toGeocode)) {
+    
+    # take subset, change base and toRow
+    toRow = ifelse((base+batchSize-1)>nrow(toGeocode),nrow(toGeocode),(base+batchSize-1))
+    toGeocode_sub = toGeocode[c(base:toRow),]
+    base = toRow+1
+    
+    # expand toGeocode if that option is enabled
+    if (expand) {
+      toGeocode_sub = expandAddresses(toGeocode_sub,tgID)
+    }
+    
+    
+    #prepares the dataframe that will hold the geocode information
+    # it has: a unique ID
+    #         a row for each geography, including smallest geography
+    #         the classifying vars: fm_numDiff, fm_geoDist, fm_type, fm_vars, fm_numMatches
+    #         a var for each match type
+    full_geocode_sub = data.frame(unique(toGeocode_sub[[tgID]]))
+    names(full_geocode_sub ) = tgID
+    for (var in c(smallestGeo,geographies,"fm_type","fm_geoDist","fm_numDiff","fm_vars","fm_numMatches",
+                  unlist(lapply(matches,FUN = function(x){paste(x[[1]],collapse="; ")})))) {full_geocode_sub[,var]=NA}
+    
+    # iterating through each match
+    for (matchVars in matches) {
+      match = matchVars[[1]]
+      maxNumDifference = matchVars[[2]]
+      maxGeoDistance = matchVars[[3]]
+      
+      # get all of the potential matches, that will then be reduced down to real data
+      # uniqueMatches, geoMatches, nonUnique matches are non-overlapping and each follow the same variable format, so they are then rbinded
+      rawMatches = getRawMatches(toGeocode = toGeocode_sub,reference = reference,match = match,smallestGeo = smallestGeo,geographies = geographies,maxNumDifference = maxNumDifference,tgID = tgID)
+      
+      if (nrow(rawMatches)>0) {
+        # first processing of raw matches, gets unique matches
+        uniqueMatches = getUniqueMatches(rawMatches = rawMatches,tgID = tgID,smallestGeo = smallestGeo,reference = reference,geographies = geographies)
+        
+        # removes unique matches, gets geo matches
+        remainingRawMatches = rawMatches[ !rawMatches[[tgID]] %in% uniqueMatches[[tgID]],]
+        if (!is.na(maxGeoDistance)) {
+          geoMatches = getGeoMatches(remainingRawMatches = remainingRawMatches,tgID = tgID,smallestGeo = smallestGeo,geographies =  geographies,referenceShp = referenceShp,toGeocodeShp = toGeocodeShp,maxGeoDistance = maxGeoDistance,reference = reference)
+          remainingRawMatches = remainingRawMatches[ !remainingRawMatches[[tgID]] %in% geoMatches[[tgID]],]
+        } else {
+          geoMatches = emptyDF(c(tgID,smallestGeo,geographies,"fm_type","fm_geoDist"))
+        }
+        
+        # removes geo matches, gets non unique matches
+        nonUniqueMatches = getNonUniqueMatches(remainingRawMatches = remainingRawMatches,tgID = tgID,geographies = geographies,smallestGeo = smallestGeo)
+        
+        # create allMatches, add the meta variables
+        allMatches = rbind(uniqueMatches,geoMatches,nonUniqueMatches)
+        allMatches = addMetaVars(allMatches = allMatches,match = match,tgID = tgID,smallestGeo = smallestGeo,rawMatches = rawMatches)
+        
+        
+        # add data into the full_geocode file
+        full_geocode_sub = merge_and_move(full_geocode_sub, allMatches,byx=tgID,allx=T,varList = c(smallestGeo,geographies,paste(match,collapse="; "), "fm_type","fm_geoDist","fm_numDiff","fm_vars","fm_numMatches"))
+        
+        # remove matches that we have smallestGeo for from toGeocode file
+        toGeocode_sub = toGeocode_sub[ ! toGeocode_sub[[tgID]] %in% allMatches[[tgID]][!is.na(allMatches[[smallestGeo]])],]
+      }
+      
+      # if nothing was merged on, the number of matches is made 0
+      full_geocode_sub[[paste(match,collapse="; ")]][is.na(full_geocode_sub[[paste(match,collapse="; ")]])]=0
+    }
+    
+    if (!exists("full_geocode")) {
+      full_geocode = full_geocode_sub
+    } else {
+      full_geocode = rbind(full_geocode,full_geocode_sub)
+    }
+    print(paste(toRow,"/",nrow(toGeocode)," processed. ",sum(!is.na(full_geocode[[smallestGeo]])),"/",toRow," fully geocoded.",sep=""))
+  }
+  #return the geocoded file and the original file
+  full_geocode$fm_type = ifelse(!is.na(full_geocode$fm_type),full_geocode$fm_type,
+                                ifelse(rowSums(full_geocode[,unlist(lapply(matches,FUN = function(x){paste(x[[1]],collapse="; ")}))])>0,"Non-Unique matches","No matches"))
+  print("Finished geocode: ")
+  print(table(full_geocode$fm_vars,full_geocode$fm_type,useNA = "always"))
+  
+  #rearranges the vars before returning
+  full_geocode = full_geocode[,c( c(tgID,smallestGeo,geographies,"fm_type","fm_geoDist","fm_numDiff","fm_vars","fm_numMatches") ,
+                   setdiff(names(full_geocode), c(tgID,smallestGeo,geographies,"fm_type","fm_geoDist","fm_numDiff","fm_vars","fm_numMatches")))]
+  
+  return(full_geocode)
+}
 emptyDF = function(varNames){
   emptyDF = data.frame()
   for (var in varNames) {emptyDF[,var]=logical(0)}
@@ -14,7 +259,7 @@ emptyDF = function(varNames){
 
 getReferenceShpFile = function(refShpPath,refShpName,planarCRS,refName) {
     # if geographic data is included it pulls the geographic reference data
-    referenceShp = capture.output(readOGR(refShpPath,refShpName,stringsAsFactors=F))
+    referenceShp = readOGR(refShpPath,refShpName,stringsAsFactors=F,verbose = F)
     referenceShp = spTransform(referenceShp,CRS(planarCRS))
     # this will have to be changed if the name changes
     if (refName == "LandParcels") {referenceShp@data$Land_Parcel_ID = referenceShp@data$Ln_P_ID}    
@@ -111,7 +356,7 @@ getUniqueMatches = function(rawMatches,tgID,smallestGeo,reference,geographies) {
 getGeoMatches = function(remainingRawMatches,tgID,smallestGeo, geographies,referenceShp,toGeocodeShp,maxGeoDistance,reference) {
   # removing matches that don't have geographic data
   toAggregate = remainingRawMatches[ remainingRawMatches[[smallestGeo]] %in% referenceShp@data[[smallestGeo]] & 
-                                       remainingRawMatches[[tgID]] %in% toGeocode.shp@data[[tgID]],]
+                                       remainingRawMatches[[tgID]] %in% toGeocodeShp@data[[tgID]],]
   if (nrow(toAggregate)>0) {
     geoMatches = by(toAggregate,INDICES = toAggregate[[tgID]],findClosestGeo,referenceShp = referenceShp, toGeocodeShp=toGeocodeShp,smallestGeo=smallestGeo,tgID=tgID)     
     geoMatches = data.frame(ph1 = names(geoMatches),ph2 = unlist(lapply(geoMatches,'[[',1)),ph3 =unlist(lapply(geoMatches,'[[',2)),stringsAsFactors=F)
@@ -184,8 +429,8 @@ initialCheck = function(xy, refShpPath, refShpName, toGeocodeShp,toGeocode,refNa
       print("Geographic mode indicated but no spatial reference provided - EXITING")
       return(0)
     }
-    if (is.na(toGeocodeShp)) {
-      print("Geographic mode indicated but no spatial to geocode file provided - EXITING")
+    if (!isS4(toGeocodeShp)) {
+      print("Geographic mode indicated but missing or invalid toGeocodeShp - EXITING")
       return(0)
     }
     if ( !"data" %in% slotNames(toGeocodeShp)) {
@@ -193,7 +438,7 @@ initialCheck = function(xy, refShpPath, refShpName, toGeocodeShp,toGeocode,refNa
       return(0)
     }
     if ( "data" %in% slotNames(toGeocodeShp)) {
-      if (!tgID %in% toGeocodeShp@data) {
+      if (!tgID %in% names(toGeocodeShp@data)) {
         print("tgID not in toGeocodeShp - EXITING")
         return(0)
       }
@@ -213,7 +458,8 @@ secondaryCheck = function(smallestGeo,referenceShp,toGeocodeShp,geographies,refe
   # check that toGeocode and reference each have the right variables
   if (sum(c(geographies,smallestGeo) %in% names(reference)) < length(c(geographies,smallestGeo))) {
     print("Reference file missing some geographies - EXITING")
-
+    print(names(reference))
+    print(c(geographies,smallestGeo))
     return(0)
   }
   
@@ -227,185 +473,8 @@ secondaryCheck = function(smallestGeo,referenceShp,toGeocodeShp,geographies,refe
   }
   return(1)
 }
-# toGeocode: the data frame or spatial object to be geocoded
-#   if xy is true, then it must be a spatial object, with a projection
-#   in either case it needs to have the following columns: num1, num2, street_c, suffix_c, zip_c, city_c
-#   any of them can be NA (for example city_c is almost always entirely NA, and num2 is almost entirely NA)
-#   those columns can be created using the cleaning functions 
-# tgID: unique ID for the data frame, must be unique!
-# refName: the database to match to, can either be "Roads","Sam", or "LandParcels"
-#   The reference file pointed to must have all of the geographies in the geographies argument
-# smallestGeo: the smallest geography after which you deem an object geocoded
-#   99% of the time this should be TLID for roads and Land_Parcel_ID for LandParcels
-#   I actually can't really think of a time when you would want something different, so maybe it should just be coded in that way
-# geographies: a vector of column names of geographies I want to find out about through the geocoding
-#   if xy is true, then these will just be merged on from the closest match
-#   if xy is false, then if there is a perfect match these will be merged on in the same way
-#   but if xy is false and there are multiple matches with no perfect one, these will be added if all of the matches agree for their value
-#   for example if there are 10 matches but all are within the same tract, then that tract will be added      
-# weirdRange: used when expanding the addresses in the reference file, determines whether 25-3 should be interpreted as 3-25
-#   typically I say no, since I think it opens us up to too many potential errors
-# fullRange: used when expanding the addresses in the reference file, determines whether 1-5 shoudl be expanded to 1, 3, 5 or 1, 2, 3, 4, 5
-#   this is especially important when geocoding to roads
-#   i think the best way to use this is to first geocode with it off, then geocode the remains with it on
-#   if you have xy it doesn't matter so much, because it will match based on street and then find the clsest
-# oddsAndEvens: used when expanding the addresses in the reference file, determines whether 2-5 should be change to 2-4, or 2-3 to 2-2
-# buffer: used when expanding addresses in the reference file, if it is 2, 3-7 will expand to 1, 3, 5, 7, 9, allowing for close matches
-#   this should be used like fullRange, as a secondary match
-# xy: a boolean saying whether the toGeocode has geographic data that can be used, if true then a shapefile for hte reference file will be pulled
-#   and a different algorithm is used for matching
-# matches: be default it does all possible matches, but here you can specify which pieces of the address you want to match based on
-#   it is a list of matches, and they are done in that order, so the more strict matches should be placed first, since they are better matches
-
-# description of process
-# the geocoder first pulls a reference dataset, based on refName, that dataset has expanded out its addresses from
-#   1-5 Maple St. to 3 rows: 1, 3, 5 Maple St., so that all possible matches are made
-# it then merges based on the list of matches. if the default list of matches is specified, first it merges based on street_c, num1, suffix_c, and zip_c, 
-#   then it tries with city instead of zip, etc. 
-# based on the matches, it figures out the geographies, and it adds them to the data frame to be returned
-#   the algorithm for getting geographies is as simple as just copying them over if it is a perfect match
-#   or it can find if one geography that is common to all matches if there are multiple matches
-#   or it can use geographic data - this is all explained in more detail below
-# any that are matched such that we know their "smallest geo" are then excluded from future matches
-# after all matches have been attempted, the dataset is returned
 
 
-
-geocode <- function(toGeocode,tgID,refName,smallestGeo,geographies=c(),refCSVPath,
-                    toGeocodeShp = NA, weirdRange=F,fullRange=F,oddsAndEvens=T,buffer=0, expand = T,
-                    refShpPath = NA, refShpName = NA, fuzzyMatching = F,fuzzyMatchDBPath =NA, batchSize = 3000,planarCRS = "+init=epsg:32619 +units=m",
-                    matches = list(
-                      list(c("street_c","num1","suffix_c","zip_c"),NA,NA), # first NA is num, second is geo
-                      list(c("street_c","num1","suffix_c","city_c"),NA,NA),
-                      list(c("street_c","num1","suffix_c"),NA,NA),
-                      list(c("street_c","suffix_c","city_c"),NA,NA),
-                      list(c("street_c","suffix_c","zip_c"),NA,NA),
-                      list(c("street_c","num1","city_c"),NA,NA),
-                      list(c("street_c","suffix_c"),NA,NA),
-                      list(c("street_c","num1"),NA,NA),
-                      list(c("street_c","zip_c"),NA,NA),
-                      list(c("street_c","city_c"),NA,NA),
-                      list(c("street_c"),NA,NA))) {
-  
-  # Part of a series of little messages, since geocoding can take a while
-  print("Starting geocoder")
-  
-  # doing some manipulations of the arguments
-  xy = (sum(!is.na(lapply(matches,'[[',3)))>0)
-  if (length(geographies)==0 | (length(geographies == 1) & smallestGeo %in% geographies)) {
-    geographies = c()
-  } else {
-    geographies = setdiff(geographies,smallestGeo)
-  }
-
-  # doing an initial check of the arguments
-  if (!initialCheck(xy = xy,refShpPath = refShpPath,refShpName = refShpName,toGeocodeShp = toGeocodeShp,toGeocode = toGeocode,refName = refName,tgID = tgID)){return(NA)}
-
-  # this returns the data frame that will be geocoded again
-  reference = getReferenceFile(refName = refName,weirdRange=weirdRange,buffer=buffer,fullRange=fullRange,refCSVPath = refCSVPath,oddsAndEvens=oddsAndEvens)
-  
-  # if xy, get reference shp and make sure toGeocodeShp is in correct projection
-  if (xy) {
-      referenceShp = getReferenceShpFile(refShpPath = refShpPath,refShpName = refShpName,planarCRS = planarCRS,refName =refName)
-      # projection is changed to planar in order to do gDistance
-      toGeocodeShp = spTransform(toGeocodeShp,CRS(planarCRS))
-  } else {
-    referenceShp = NA
-    toGeocodeShp = NA
-  }
-  print("Reference loaded")
-
-  toGeocode = prepareFileToGeocode(toGeocode = toGeocode,fuzzyMatching = fuzzyMatching,reference = reference,fuzzyMatchDBPath = fuzzyMatchDBPath)
-
-  if(!secondaryCheck(smallestGeo = smallestGeo,referenceShp = referenceShp,toGeocodeShp = toGeocodeShp,geographies = geographies,reference = reference,tgID = tgID,matches = matches,toGeocode = toGeocode,xy=xy)) {return(NA)}
-  
-  print("Starting geocoding")
-  # iterating in batches of 3000
-  base = 1
-  while (base < nrow(toGeocode)) {
-    
-    # take subset, change base and toRow
-    toRow = ifelse((base+batchSize-1)>nrow(toGeocode),nrow(toGeocode),(base+batchSize-1))
-    toGeocode_sub = toGeocode[c(base:toRow),]
-    base = toRow+1
-    
-    # expand toGeocode if that option is enabled
-    if (expand) {
-      toGeocode_sub = expandAddresses(toGeocode_sub,tgID)
-    }
- 
-    
-    #prepares the dataframe that will hold the geocode information
-    # it has: a unique ID
-    #         a row for each geography, including smallest geography
-    #         the classifying vars: fm_numDiff, fm_geoDist, fm_type, fm_vars, fm_numMatches
-    #         a var for each match type
-    full_geocode_sub = data.frame(unique(toGeocode_sub[[tgID]]))
-    names(full_geocode_sub ) = tgID
-    for (var in c(smallestGeo,geographies,"fm_type","fm_geoDist","fm_numDiff","fm_vars","fm_numMatches",
-                  unlist(lapply(matches,FUN = function(x){paste(x[[1]],collapse="; ")})))) {full_geocode_sub[,var]=NA}
-
-    # iterating through each match
-    for (matchVars in matches) {
-      match = matchVars[[1]]
-      maxNumDifference = matchVars[[2]]
-      maxGeoDistance = matchVars[[3]]
-      
-      # get all of the potential matches, that will then be reduced down to real data
-      # uniqueMatches, geoMatches, nonUnique matches are non-overlapping and each follow the same variable format, so they are then rbinded
-      rawMatches = getRawMatches(toGeocode = toGeocode_sub,reference = reference,match = match,smallestGeo = smallestGeo,geographies = geographies,maxNumDifference = maxNumDifference,tgID = tgID)
-      
-      if (nrow(rawMatches)>0) {
-        # first processing of raw matches, gets unique matches
-        uniqueMatches = getUniqueMatches(rawMatches = rawMatches,tgID = tgID,smallestGeo = smallestGeo,reference = reference,geographies = geographies)
-       
-        # removes unique matches, gets geo matches
-        remainingRawMatches = rawMatches[ !rawMatches[[tgID]] %in% uniqueMatches[[tgID]],]
-        if (!is.na(maxGeoDistance)) {
-          geoMatches = getGeoMatches(remainingRawMatches = remainingRawMatches,tgID = tgID,smallestGeo = smallestGeo,geographies =  geographies,referenceShp = referenceShp,toGeocodeShp = toGeocodeShp,maxGeoDistance = maxGeoDistance,reference = reference)
-          remainingRawMatches = remainingRawMatches[ !remainingRawMatches[[tgID]] %in% geoMatches[[tgID]],]
-        } else {
-          geoMatches = emptyDF(c(tgID,smallestGeo,geographies,"fm_type","fm_geoDist"))
-        }
-        
-        # removes geo matches, gets non unique matches
-        nonUniqueMatches = getNonUniqueMatches(remainingRawMatches = remainingRawMatches,tgID = tgID,geographies = geographies,smallestGeo = smallestGeo)
-        
-        # create allMatches, add the meta variables
-        allMatches = rbind(uniqueMatches,geoMatches,nonUniqueMatches)
-        allMatches = addMetaVars(allMatches = allMatches,match = match,tgID = tgID,smallestGeo = smallestGeo,rawMatches = rawMatches)
-      
-        
-        # add data into the full_geocode file
-        full_geocode_sub = merge_and_move(full_geocode_sub, allMatches,byx=tgID,allx=T,varList = c(smallestGeo,geographies,paste(match,collapse="; "), "fm_type","fm_geoDist","fm_numDiff","fm_vars","fm_numMatches"))
-              
-        # remove matches that we have smallestGeo for from toGeocode file
-        toGeocode_sub = toGeocode_sub[ ! toGeocode_sub[[tgID]] %in% allMatches[[tgID]][!is.na(allMatches[[smallestGeo]])],]
-      }
-      
-      # if nothing was merged on, the number of matches is made 0
-      full_geocode_sub[[paste(match,collapse="; ")]][is.na(full_geocode_sub[[paste(match,collapse="; ")]])]=0
-    }
-    
-    if (!exists("full_geocode")) {
-      full_geocode = full_geocode_sub
-    } else {
-      full_geocode = rbind(full_geocode,full_geocode_sub)
-    }
-    print(paste(toRow,"/",nrow(toGeocode)," processed. ",sum(!is.na(full_geocode[[smallestGeo]])),"/",toRow," fully geocoded.",sep=""))
-  }
-  #return the geocoded file and the original file
-  full_geocode$fm_type = ifelse(!is.na(full_geocode$fm_type),full_geocode$fm_type,
-                                ifelse(rowSums(full_geocode[,unlist(lapply(matches,FUN = function(x){paste(x[[1]],collapse="; ")}))])>0,"Non-Unique matches","No matches"))
-  print("Finished geocode: ")
-  print(table(full_geocode$fm_vars,full_geocode$fm_type,useNA = "always"))
-  
-  #rearranges the vars before returning
-  full_geocode[,c( c(tgID,smallestGeo,geographies,"fm_type","fm_geoDist","fm_numDiff","fm_vars","fm_numMatches") ,
-                   setdiff(names(full_geocode), c(tgID,smallestGeo,geographies,"fm_type","fm_geoDist","fm_numDiff","fm_vars","fm_numMatches")))]
-  
-  return(full_geocode)
-}
 
 # a function used in the aggregation step of geographic matches, finds the closest polygon in the refernce file
 findClosestGeo = function(df,referenceShp,toGeocodeShp,smallestGeo,tgID) {
@@ -439,6 +508,7 @@ fuzzymatchNames = function(df, reference,referenceType="df",fuzzyMatch=Inf,fuzzy
   if ("street_1" %in% names(reference)) {
     reference$street_c = reference$street_1
   }
+  
   # get fuzzy match DB
   if (fuzzyMatchDBPath !="") {
     fmdb= read.csv(fuzzyMatchDBPath,stringsAsFactors=F)
@@ -447,6 +517,7 @@ fuzzymatchNames = function(df, reference,referenceType="df",fuzzyMatch=Inf,fuzzy
     print("Fuzzy matches not being recorded")
     fmdb = data.frame(street1=NA,street2=NA,decision=NA)
   }
+  
   uniqueStreet = unique(df$street_c[! df$street_c %in% reference$street_c])
   for (i in c(1:length(uniqueStreet))) {
     temp = stringdist(uniqueStreet[i],reference$street_c)/nchar(uniqueStreet[i])
@@ -468,6 +539,7 @@ fuzzymatchNames = function(df, reference,referenceType="df",fuzzyMatch=Inf,fuzzy
         }
         fmdb[nrow(fmdb)+1,]=c(uniqueStreet[i],reference$street_c[which.min(temp)],decision)
       }
+      
       if (as.numeric(decision)==1) {
         df[!is.na(df$street_c) & df$street_c == uniqueStreet[i],"street_c"] = reference$street_c[which.min(temp)]
         if (sum(dbCheck)>0){print(paste(c(uniqueStreet[i],"-----YES---->",reference$street_c[which.min(temp)]),collapse=""))}
@@ -542,7 +614,7 @@ getReferenceFile = function(refName,weirdRange=F,buffer=0,fullRange=F,oddsAndEve
     reference_raw$suffix_c = clean_suffix(reference_raw$suffix_c)
     reference_raw$zip_c = clean_zip(reference_raw$zip_c)
     reference_raw$city_c = clean_city(reference_raw$city_c)
-    reference_raw$unit_c = (clean_unit(reference_raw$unit_c,reference_raw$num1))
+    reference_raw$unit_c = clean_unit(unit = reference_raw$unit_c,num = reference_raw$num1)
     reference_raw$ReferenceID = reference_raw$SAM_ADDRESS_ID
   } else {
     print("REFERENCE NAME NOT FOUND")

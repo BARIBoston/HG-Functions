@@ -3,6 +3,7 @@ library(dplyr)
 
 ###### HG 6/29 
 # A huge amount of this should be replaced by libPostal :L
+### HG 7/27 - although.... i used a different library in python and it wasn't all that effective
 
 
 
@@ -10,6 +11,175 @@ library(dplyr)
 #         Cleaning Functions           #
 #--------------------------------------#
 trim <- function (x) gsub("^\\s+|\\s+$", "", x)  
+
+splitAddress = function(addrVarName,dataset) {
+  
+  dataset$addressSearch = toupper(dataset[,addrVarName])
+  
+  
+  # zip
+  zip_reg = "( [0-9]{1,5})([ -])?([0-9]{1,5})?$"
+  dataset$zip_c = clean_zip(str_match(dataset$addressSearch,zip_reg)[,2])
+  dataset$addressSearch = trim(gsub(zip_reg,"",dataset$addressSearch))
+  
+  # MA
+  ma_reg = " MA$"
+  dataset$addressSearch = trim(gsub(ma_reg,"",dataset$addressSearch))
+  
+  
+  # CITY
+  city_reg = "( MISSION HILL| SOUTH BOSTON| MATTAPAN| DORCHESTER| HYDE PARK| ROXBURY| JAMAICA PLAIN| BOSTON| CHESTNUT HILL| ALLSTON| BRIGHTON| CHARLESTOWN| ROSLINDALE| REVERE| BROOKLINE| WINTHROP| CHELSEA| DORCHESTER CENTER| ROXBURY CROSSING| SPRINGFIELD)$"
+  dataset$city_c = clean_city(str_match(dataset$addressSearch,city_reg))[,2]
+  dataset$addressSearch = trim(gsub(city_reg,"",dataset$addressSearch))
+  
+  
+  # SUFFIX
+  suffix_unit_reg = "(.*)( PKWY | PKWY$| LN | LN$| WHF | WHF$| TER | TER$| RD | RD$| PL | PL$| CIR | CIR$| BLVD | BLVD$| WAY | WAY$| DR | DR$| CT | CT$| HWY | HWY$| ST | ST$| ALLEY | AVE | AVENUE | BOULEVARD | CIRCLE | COURT | DRIVE | EXT\\. | HIGHWAY | LANE | PARK | PARKWAY | PLACE | ROAD | ROADWAY | ROW | SQUARE | STREET | TERRACE | WAY | ALLEY$| AVE$| AVENUE$| BOULEVARD$| CIRCLE$| COURT$| DRIVE$| EXT\\.$| HIGHWAY$| LANE$| PARK$| PARKWAY$| PLACE$| ROAD$| ROADWAY$| ROW$| SQUARE$| STREET$| TERRACE$| WAY$)([-A-Z0-9# .,/]*)?$"
+  temp = str_match(dataset$addressSearch, suffix_unit_reg)
+  dataset$unit = temp[,4]
+  dataset$suffix_c = clean_suffix(temp[,3])
+  dataset$addressSearch = ifelse(!is.na(temp[,2]),temp[,2],dataset$addressSearch)
+  rm(temp)
+  
+  # replace street names that have a number that will mess this up ("PIER 4")
+  dataset$addressSearch = gsub("PIER 4|PIERRE 4","PIER FOUR",dataset$addressSearch)
+  dataset$addressSearch = gsub("1ST$","FIRST",
+                               gsub("2ND$","SECOND",
+                                    gsub("3RD$","THIRD",
+                                         gsub("4TH$","FOURTH",
+                                              gsub("5TH$","FIFTH",
+                                                   gsub("6TH$","SIXTH",
+                                                        gsub("7TH$","SEVENTH",
+                                                             gsub("8TH$","EIGHTH",
+                                                                  gsub("9TH$","NINTH",
+                                                                       gsub("10TH$","TENTH",
+                                                                            gsub("11TH$","ELEVENTH",
+                                                                                 gsub("12TH$","TWELTH",
+                                                                                      gsub("13TH$","THIRTEENTH",
+                                                                                           gsub("14TH$","FOURTEENTH",
+                                                                                                gsub("15TH$","FIFTEENTH",
+                                                                                                     gsub("16TH$","SIXTEENTH",
+                                                                                                          gsub("17TH$","SEVENTEENTH",
+                                                                                                               gsub("18TH$","EIGHTEENTH",
+                                                                                                                    gsub("19TH$","NINETEENTH",
+                                                                                                                         gsub("20TH$","TWENTIETH",
+                                                                                                                              dataset$addressSearch))))))))))))))))))))
+  
+  
+  # get other ones that are missed because they don't have a suffix ("170 PARKER HILL 170-43")
+  #unit_reg2 = "(UNIT)? ?[A-Z]?[0-9]+[A-Z]?[ -.]?([A-Z]?[0-9]+[A-Z]?)?$"
+  #temp1 = str_match(dataset$addressSearch, unit_reg2)
+  twoCharNotUnit = "(?![^A-Z]BLDG)(?![^A-Z]BLD)(?![^A-Z]UNIT)(?![^A-Z]FL)(?![^A-Z]RM)([^A-Z][A-Z]{2,})"
+  # adds a space in front in case there is no number, and a space after for the split
+  temp = strsplit(paste(paste(" ",dataset$addressSearch,sep="")," ",sep=""), twoCharNotUnit,perl = T)
+  
+  temp2 = unlist(
+    lapply(temp,FUN=function(x){
+      if (length(x)>1 & trim(as.character(x[length(x)])) != "" & as.character(x[length(x)]) != ".") {
+        return(trim(as.character(x[length(x)])))
+      } else {
+        return(NA)
+      }
+    }))
+  dataset$unit[is.na(dataset$unit)] = temp2[is.na(dataset$unit)]
+  dataset$unit = trim(dataset$unit)
+  
+  dataset$addressSearch = trim(dataset$addressSearch)
+  for (i in c(1:length(temp2))) {
+    if (!is.na(temp2[i])) {
+      dataset$addressSearch[i] = trim(substr(dataset$addressSearch[i],start = 1,stop=nchar(dataset$addressSearch[i])-nchar(temp2[i])))
+    }
+  }
+  
+  rm(temp,temp2)
+  
+  dataset$postDir = ifelse(   dataset$unit == "E" | dataset$unit == "E." | 
+                                dataset$unit == "S" | dataset$unit == "S." | 
+                                dataset$unit == "N" | dataset$unit == "N." | 
+                                dataset$unit == "W" | dataset$unit == "W." ,gsub("\\.","",dataset$unit),NA)
+  dataset$unit[ dataset$unit == "E" | dataset$unit == "E." | 
+                  dataset$unit == "S" | dataset$unit == "S." | 
+                  dataset$unit == "N" | dataset$unit == "N." | 
+                  dataset$unit == "W" | dataset$unit == "W."]=NA
+  
+  
+  
+  # NUMBER
+  dataset$backup = dataset$addressSearch
+  
+  dataset$addressSearch = dataset$backup
+  
+  #oneToNine = c("ONE","TWO","THREE","FOUR","FIVE","SIX","SEVEN","EIGHT","NINE")
+  #tenToNineteen = c("TEN","ELEVEN","TWELVE","THIRTEEN","FOURTEEN","FIFTEEN","SIXTEEN","SEVENTEEN","EIGHTEEN","NINETEEN")
+  #twentyToNinety = c("TWENTY","THIRTY","FORTY","FIFTY","SIXTY","SEVENTY","EIGHTY","NINETY")
+  # these seem to be the only ones that were written as numbers, so no need for combining below
+  
+  #numbers= c(paste(rep(twentyToNinety,9)[order(rep(twentyToNinety,9))],oneToNine,sep = " "),
+  #           paste(rep(twentyToNinety,9)[order(rep(twentyToNinety,9))],oneToNine,sep = ""),
+  #           paste(rep(twentyToNinety,9)[order(rep(twentyToNinety,9))],oneToNine,sep = "-"))
+  
+  dataset$addressSearch = gsub("^ONE ","1 ",
+                               gsub("^TWO ","2 ",
+                                    gsub("^THREE ","3 ",
+                                         gsub("^FOUR ","4 ",
+                                              gsub("^FIVE ","5 ",
+                                                   gsub("^SIX ","6 ",
+                                                        gsub("^SEVEN ","7 ",
+                                                             gsub("^EIGHT ","8 ",
+                                                                  gsub("^NINE ","9 ",
+                                                                       gsub("^TEN ","10 ",
+                                                                            gsub("^ELEVEN ","11 ",
+                                                                                 gsub("^TWELVE ","12 ",
+                                                                                      gsub("^THIRTEEN " ,"13 ",
+                                                                                           gsub("^FOURTEEN ","14 ",
+                                                                                                gsub("^FIFTEEN ","15 ",
+                                                                                                     gsub("^SIXTEEN ","16 ",
+                                                                                                          gsub("^SEVENTEEN ","17 ",
+                                                                                                               gsub("^EIGHTEEN ","18 ",
+                                                                                                                    gsub("^NINETEEN ","19 ",
+                                                                                                                         gsub("^TWENTY ","20 ",
+                                                                                                                              gsub("^THIRTY ","30 ",
+                                                                                                                                   gsub("^FORTY ","40 ",
+                                                                                                                                        gsub("^FIFTY ","50 ",
+                                                                                                                                             gsub("^SIXTY ","60 ",
+                                                                                                                                                  gsub("^SEVENTY ","70 ",
+                                                                                                                                                       gsub("^EIGHTY ","80 ",
+                                                                                                                                                            gsub("^NINETY ","90 ",
+                                                                                                                                                                 dataset$addressSearch)
+                                                                                                                                                       ))))))))))))))))))))))))))
+  
+  
+  
+  numbers_reg = "^([0-9]+)([A-Z]{0,2})[ -]?([0-9]+([A-Z]{0,2}))?"
+  
+  temp = str_match(dataset$addressSearch,numbers_reg)
+  dataset$num1 = (temp[,2])
+  dataset$num2 = (temp[,4])
+  temp[is.na(temp[,3]),3]=""
+  temp[is.na(temp[,5]),5]=""
+  dataset$unit[is.na(dataset$unit)] = ""
+  dataset$unit = trim(paste(trim(paste(temp[,5],temp[,3],sep=" ")),dataset$unit,sep=" "))
+  dataset$unit[dataset$unit ==""] = NA
+  
+  # probably a way to combine this into the earlier regex, but grabbing streets that have a single letter (unit) at the beginning but are not just a single letter
+  temp = str_match(dataset$addressSearch,"^([ABCDEF]) ")
+  
+  dataset$street_c = clean_streetName(gsub(numbers_reg,"",dataset$addressSearch))
+  rm(temp)
+  dataset$addressSearch = NULL
+  dataset$backup = NULL
+  #View(head(dataset[!is.na(dataset$LOCATION) & is.na(dataset$suffix_c),c(addrVarName,"num1","num2","street_c","suffix_c","postDir","unit","city_c","zip_c")],200))
+  
+  
+  #View(head(dataset[,c(addrVarName,"num1","num2","street_c","suffix_c","postDir","unit","city_c","zip_c")],200))
+  
+  #View(head(dataset[is.na(dataset$num1),c(addrVarName,"num1","num2","street_c","suffix_c","postDir","unit","city_c","zip_c")],200))
+  
+  #write.csv(dataset,"Documents/Research/My Research/Thesis/Scraping/dataset/asCSV/dataset_c.csv",row.names=F)
+  return(dataset)
+}
+
+
 
 # this is dumb inefficient code, but it runs quickly enough and seems silly to go back and improve it now - HG 6/2017
 # this fixes the name and some common formatting inconsistencies in geographic IDs
@@ -72,7 +242,7 @@ clean_unit = function(unit, num = NA) {
   
   # get rid of street numbers in unit
   if (sum(!is.na(num)) > 0 ) {
-    badUnits_cond = (is.na(as.numeric(unit_c)) | as.numeric(unit_c) != unit_c) & (unit_c != "" & !is.na(unit_c))
+    badUnits_cond = (is.na(suppressWarnings(as.numeric(unit_c))) | suppressWarnings(as.numeric(unit_c)) != unit_c) & (unit_c != "" & !is.na(unit_c))
     if (sum(badUnits_cond)>0) {
       badUnits = data.frame(num =   num[badUnits_cond], unit = unit_c[ badUnits_cond],stringsAsFactors = F)
       for (i in c(1:nrow(badUnits))) {
@@ -83,20 +253,61 @@ clean_unit = function(unit, num = NA) {
         } else {
           badUnits$unit[i] = gsub(paste("^",badUnits$num[i],"(-| )|^",badUnits$num[i],"(?=[A-Z] ?-?[0-9])",sep=""),"",badUnits$unit[i],perl = T)
         }
-        if(i%%1000==0){print(i)}
       }
       unit_c[badUnits_cond] = badUnits$unit  
     }
   }
+  
   # removes spaces and hyphens if it's not a number or a letter on both sides (1-2--->1-2; 1-A--->1A)
   unit_c = gsub(" {2,}"," ",unit_c)
   unit_c = gsub(" - | -|- ","-",unit_c)
   unit_c = gsub("((?<=[0-9])(-| )(?=[A-Z]))|((?<=[A-Z])(-| )(?=[0-9]))","",unit_c,perl = T)
-  unit_c[ !is.na(as.numeric(unit_c))] = as.numeric(unit_c)[!is.na(as.numeric(unit_c))]
+  unit_c[ !is.na(suppressWarnings(as.numeric(unit_c)))] = suppressWarnings(as.numeric(unit_c))[!is.na(suppressWarnings(as.numeric(unit_c)))]
+ 
+
+  unit_c = trim(gsub("^\\.","",unit_c))
+  # LEFT or RIGHT at the end
+  unit_c = gsub("LEFT$","L",unit_c)
+  unit_c = gsub("RIGHT$","R",unit_c)
   
   # East or West at the end
   unit_c = gsub("EAST$|E.$","E",unit_c)
   unit_c = gsub("WEST$|W.$","E",unit_c)
+  
+  # 
+  unit_c = gsub("^RIGHT SIDE$","R",unit_c)
+  unit_c = gsub("^LEFT SIDE$","R",unit_c)
+  
+  temp = str_match(unit_c,"^(FLR|FL)(.+)(RM|#|APT|,)(.+)$")
+  if (sum(!is.na(temp[,1]))>0) {
+    temp[,3] = trim(gsub("\\.|,","",temp[,3]))
+    temp[,5] = trim(gsub("\\.|,","",temp[,5]))
+    temp2 = str_match(temp[,5],"([A-Z]?)([0-9]{0,2})([A-Z]?)")
+    if (sum(!is.na(temp2[,1]))>0) {
+        temp2[,3] = ifelse(is.na(temp2[,1]),
+                     NA,
+                     ifelse(nchar(temp2[,3])==1,
+                            paste("0",temp2[,3],sep=""),
+                            temp2[,3]))
+        unit_c[!is.na(temp[,1])] = paste(temp[!is.na(temp[,1]),3],temp2[!is.na(temp[,1]),3],temp2[!is.na(temp[,1]),2],temp2[!is.na(temp[,1]),4],sep="")
+    }
+  }
+  temp = str_match(unit_c,"(^([0-9]{1,4})([A-Z]{1})$)|(^([A-Z]{1})([0-9]{1,4})$)")
+  if (sum(!is.na(temp[,1]))>0) {
+    unit_c = ifelse(is.na(temp[,1]),unit_c,
+                    ifelse(!is.na(temp[,2]),
+                           paste(as.numeric(temp[,3]),temp[,4],sep=""),
+                           paste(as.numeric(temp[,7]),temp[,6],sep="")))
+  }
+  unit_c = gsub("^RM.|^RM|^ROOM","",unit_c)
+  #
+  #temp = str_match(unit_c,"(.+)FLOOR$")
+  
+  
+  temp = str_match(unit_c,"([0-9]{1,2})ROOM([0-9]{1,2})")
+  if (sum(!is.na(temp[,1]))>0){
+    unit_c[!is.na(temp[,1])]=as.numeric(temp[!is.na(temp[,1]),2])*100 + as.numeric(temp[!is.na(temp[,1]),3])
+  }
   return(unit_c) 
 }
 
