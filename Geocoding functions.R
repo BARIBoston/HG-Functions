@@ -500,7 +500,7 @@ findClosestNum = function(df,smallestGeo,tgID) {
   return(list(df[which.min(temp),smallestGeo],min(temp),length(unique(df[,smallestGeo]))))
 }
           
-fuzzymatchNames = function(df, reference,referenceType="df",fuzzyMatch=Inf,fuzzyMatchDBPath="") {
+fuzzymatchNames = function(df, reference,referenceType="df",fuzzyMatch=Inf,fuzzyMatchDBPath=NA) {
   # get reference df
   if (referenceType == "path") {
     reference = read.csv(reference,stringsAsFactors=F)    
@@ -510,7 +510,7 @@ fuzzymatchNames = function(df, reference,referenceType="df",fuzzyMatch=Inf,fuzzy
   }
   
   # get fuzzy match DB
-  if (fuzzyMatchDBPath !="") {
+  if (!is.na(fuzzyMatchDBPath)) {
     fmdb= read.csv(fuzzyMatchDBPath,stringsAsFactors=F)
     print("Fuzzy matches being recorded")
   } else {
@@ -547,12 +547,16 @@ fuzzymatchNames = function(df, reference,referenceType="df",fuzzyMatch=Inf,fuzzy
         if (sum(dbCheck)>0){print(paste(c(uniqueStreet[i],"-----NO------",reference$street_c[which.min(temp)]),collapse=""))}
       }
     }
-    if (i%%50) {
-      write.csv(fmdb,fuzzyMatchDBPath,row.names=F)      
+    if (i%%50==0) {
+      if (!is.na(fuzzyMatchDBPath)) {
+        write.csv(fmdb,fuzzyMatchDBPath,row.names=F) 
+      }
     }
   }
-  if (fuzzyMatchDBPath !="") {
+  if (!is.na(fuzzyMatchDBPath)) {
+    write.csv(fmdb,fuzzyMatchDBPath,row.names=F) 
   }
+  
   return(df)
 }
 
