@@ -564,19 +564,39 @@ clean_city <- function(city) {
 
 # cleans and returns a vector of zips, again, crappy regex!
 clean_zip <- function(zip) {
+  
   zip = gsub(",","",gsub(",","",as.character(trim(zip))))
   zip[zip=="NULL"|zip=="NA"|zip=="0"]<-NA
   pattern1 = "^([0-9]{4})$"
-  match1 = str_match(zip,pattern1)[,2]
-  
+  match1 = str_match(zip,pattern1)
+  if (ncol(match1)>=2) {
+    match1 = match1[,2]
+  } else {
+    match1= NA
+  }
   pattern2 = "^([0-9]{5})$"
-  match2 = str_match(zip,pattern2)[,2]
+  match2 = str_match(zip,pattern2)
+  if (ncol(match2)>=2) {
+    match2 = match2[,2]
+  } else {
+    match2 = NA
+  }
   
   pattern3 = "^([0-9]{4})-([0-9]{0,4})$"
-  match3 = str_match(zip,pattern3)[,2]
+  match3 = str_match(zip,pattern3)
+  if (ncol(match3)>=2 ) {
+    match3 = match3[,2]
+  } else {
+    match3 = NA
+  }
   
   pattern4 = "^([0-9]{5})-([0-9]{0,4})$"
-  match4 = str_match(zip,pattern4)[,2]
+  match4 = str_match(zip,pattern4)
+  if (ncol(match4)>=2) {
+    match4 = match4[,2]  
+  } else {
+    match4 = NA
+  }
   
   cleaned_zip = zip
   cleaned_zip[!is.na(match1)]=paste("0",match1[!is.na(match1)],sep="")
